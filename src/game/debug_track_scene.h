@@ -12,7 +12,7 @@ namespace s3d {
 
 class DebugTrackScene : public Scene {
  public:
-  DebugTrackScene(Track track, std::string name);
+  DebugTrackScene(Track track, std::string name, std::string asset_dir = {});
 
   bool on_enter() override;
   void update(double dt, const Controls& controls) override;
@@ -22,11 +22,15 @@ class DebugTrackScene : public Scene {
   // Render `frames` frames, then write a PNG and quit. Used for CI/verification.
   void request_screenshot(std::string path, int frames);
 
+  // Start with a top-down overview camera (useful for inspecting track layout).
+  void set_top_down(bool value) { top_down_ = value; }
+
   std::string next_scene() const override { return finished_ ? "quit" : std::string(); }
 
  private:
   Track track_;
   std::string name_;
+  std::string asset_dir_;
   Camera camera_;
   Mesh mesh_;
   std::string screenshot_path_;
@@ -35,6 +39,7 @@ class DebugTrackScene : public Scene {
   int hotkey_shots_ = 0;
   bool mouse_look_ = false;
   bool pending_hotkey_ = false;
+  bool top_down_ = false;
   bool finished_ = false;
 };
 

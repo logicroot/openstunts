@@ -5,10 +5,13 @@
 #include <cmath>
 #include <cstdio>
 
+#include "assets/shape3d.h"
 #include "core/log.h"
+#include "core/paths.h"
 #include "render/renderer.h"
 #include "render/screenshot.h"
 #include "world/track_mesh.h"
+#include "world/track_shapes.h"
 #include "world/world_units.h"
 
 namespace s3d {
@@ -23,15 +26,33 @@ void aim_at(Camera& cam, const glm::vec3& target) {
 
 }  // namespace
 
-DebugTrackScene::DebugTrackScene(Track track, std::string name)
-    : track_(std::move(track)), name_(std::move(name)) {}
+DebugTrackScene::DebugTrackScene(Track track, std::string name, std::string asset_dir)
+    : track_(std::move(track)), name_(std::move(name)), asset_dir_(std::move(asset_dir)) {}
 
 bool DebugTrackScene::on_enter() {
-  mesh_ = build_track_mesh(track_);
+  ShapeLibrary lib;
+  if (!asset_dir_.empty()) {
+    lib.load_p3s(path_join(asset_dir_, "GAME1.P3S"));
+    lib.load_p3s(path_join(asset_dir_, "GAME2.P3S"));
+  }
+  if (!lib.shapes().empty()) {
+    world::TrackShapeStats stats;
+    mesh_ = world::build_track_shape_mesh(track_, lib, &stats);
+    S3D_INFO("track shapes: ground=%d terrain=%d elements=%d overlays=%d missing=%d",
+             stats.ground_cells, stats.terrain_shapes, stats.elements, stats.overlays,
+             stats.missing_shapes);
+  } else {
+    S3D_WARN("no GAME1/GAME2 shapes found; falling back to placeholder geometry");
+    mesh_ = build_track_mesh(track_);
+  }
 
   const float cx = world::cell_center_x(world::kTrackSize / 2);
   const float cz = world::cell_center_z(world::kTrackSize / 2);
-  camera_.position = glm::vec3(cx - 9000.0f, 6500.0f, cz - 12000.0f);
+  if (top_down_) {
+    camera_.position = glm::vec3(cx, 18000.0f, cz + 3000.0f);
+  } else {
+    camera_.position = glm::vec3(cx - 9000.0f, 6500.0f, cz - 12000.0f);
+  }
   aim_at(camera_, glm::vec3(cx, 0.0f, cz));
   S3D_INFO("debug scene: %s", name_.c_str());
   return true;
@@ -73,6 +94,14 @@ void DebugTrackScene::render(Renderer& renderer, int width, int height) {
 void DebugTrackScene::handle_event(const SDL_Event& e) {
   if (e.type == SDL_KEYDOWN) {
     if (e.key.keysym.sym == SDLK_F12) pending_hotkey_ = true;
+    if (e.key.keysym.sym == SDLK_t) {
+      top_down_ = !top_down_;
+      const float cx = world::cell_center_x(world::kTrackSize / 2);
+      const float cz = world::cell_center_z(world::kTrackSize / 2);
+      camera_.position = top_down_ ? glm::vec3(cx, 18000.0f, cz + 3000.0f)
+                                   : glm::vec3(cx - 9000.0f, 6500.0f, cz - 12000.0f);
+      aim_at(camera_, glm::vec3(cx, 0.0f, cz));
+    }
     if (e.key.keysym.sym == SDLK_F1) {
       mouse_look_ = !mouse_look_;
       SDL_SetRelativeMouseMode(mouse_look_ ? SDL_TRUE : SDL_FALSE);

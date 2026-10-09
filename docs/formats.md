@@ -124,3 +124,52 @@ Each primitive is `u8 type`, `u8 flags`, `u8 paint[numpaints]`, then vertex
 indices. The index count per type is
 `{0,1,2,3,4,5,6,7,8,9,10,2,6,3,0,0}` (types 11/12/13 = 2/6/3). Source:
 `reference/restunts/src/restunts/c/shape3d.c` (`shape3d_init_shape`).
+
+## Track assembly (`.TRK` → geometry)
+
+The 900-byte item grid and the 900-byte terrain grid address the same physical
+cells but are stored in **opposite row orders** in the file:
+
+* item grid: row 0 is the top (south = 29 in engine coordinates);
+* terrain grid: row 0 is the bottom (south = 0).
+
+`Track` normalises both to a top→bottom layout, so for a normalised cell
+`(x, y)`, `items[y*30 + x]` and `terrain[y*30 + x]` describe the same cell and
+its world position is `(x*1024 + 512, y*1024 + 512)` (world `+x` = column,
+`+z` = row, `+y` = up).
+
+Placement rules (`reference/restunts/src/restunts/c/frame.c`,
+`trkutil.c`, `full_data.c`):
+
+* **Terrain** byte 0 is flat land at sea level and is not a shape — render a
+  plain ground quad. Bytes 1..18 index `terrain_scene_objects[byte]`
+  (`{rot_y, shape}`); the shape is drawn at the cell centre, at `y = 0`, except
+  terrain 6 (elevated flat) which is drawn at `y = 450` (`hillHeightConsts[1]`).
+* **Elements** are indexed directly: item byte `i` → `trkObjectList[i]`. Item 0
+  is empty. Item values `0xFD`, `0xFE`, `0xFF` are continuation fillers that
+  belong to a multi-tile neighbour:
+  * `0xFD` → owner at `(x-1, y+1)`,
+  * `0xFE` → owner at `(x, y+1)`,
+  * `0xFF` → owner at `(x-1, y)`.
+* **Multi-tile** origin (`multi_tile` bits: 1 = +row/z, 2 = +column/x): a
+  single-tile element sits at the cell centre `(x*1024+512, y*1024+512)`; a
+  multi-tile element sits on the shared edge so its centred shape spans the
+  covered cells — `x = (x+1)*1024` if `&2`, `z = y*1024` if `&1`.
+* **Elements on elevated terrain** (terrain 6) are drawn at `y = 450`, and the
+  `high` shape (43) is tiled underneath as the plateau.
+* **Overlays**: `trkObjectList[i].overlay` is another element to draw at the
+  same transform. Indices ≥ 215 fall through into `terrain_scene_objects` at
+  `index - 215`.
+* **Hill terrain** (7..10) rewrites certain flat road pieces to sloped
+  `ramp`/`elsp` pieces (`trkutil.c` `subst_hillroad_track`), e.g. terrain 7
+  maps items `{4,14,24}` → `{182,186,190}` and `{39,59,98}` → `194`.
+
+Terrain shape indices (all shapes span roughly one 1024-unit cell):
+
+| terrain | 1 | 2–5 | 6 | 7–10 | 11–14 | 15–18 |
+|---|---|---|---|---|---|---|
+| shape | 45 `lake` | 44 `lakc` | 43 `high` | 42 `goup` | 41 `gouo` | 40 `goui` |
+
+The four rotations of each sloped terrain shape (0/768/512/256) select which
+corner is raised. `game3dshapes[]` is indexed by the fixed `game_shape_names`
+order; only indices ≤ 110 are track/scenery (124–130 are cars and explosions).
