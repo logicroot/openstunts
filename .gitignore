@@ -1,0 +1,13 @@
+build/
+build-*/
+cmake-build-*/
+compile_commands.json
+.cache/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+reference/
+third_party/glm/.git
