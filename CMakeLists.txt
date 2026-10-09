@@ -39,6 +39,7 @@ add_library(stunts3d_core STATIC
   src/assets/palette.cpp
   src/physics/fixed_math.cpp
   src/world/track_mesh.cpp
+  src/world/shape_mesh.cpp
   src/core/paths.cpp
   src/core/config.cpp
   src/game/application.cpp

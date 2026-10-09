@@ -5,6 +5,7 @@ add_executable(s3d_tests
   fixed_math_test.cpp
   compression_test.cpp
   shape3d_test.cpp
+  shape_mesh_test.cpp
   palette_test.cpp
 )
 target_link_libraries(s3d_tests PRIVATE stunts3d_core)
