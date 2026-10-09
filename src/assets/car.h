@@ -36,6 +36,10 @@ struct CarSpec {
   Point2D knob_points[7] = {};
 
   int16_t aero_resistance = 0;
+  // Precomputed drag lookup used by the speed model:
+  //   aero_resistance_table[i] = ((aero_resistance * i) * i) >> 9
+  // (restunts carsetup.c `aero_resistance_at`, 16-bit wrapping arithmetic).
+  int16_t aero_resistance_table[64] = {0};
   uint8_t idle_torque = 0;
   uint8_t torque_curve[104] = {0};
   uint8_t field_A3 = 0;

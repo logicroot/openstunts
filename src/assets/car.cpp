@@ -53,6 +53,14 @@ bool CarSpec::parse_simd(const uint8_t* data, size_t size) {
   }
 
   aero_resistance = read_i16(data, size, 56, &ok);
+  for (int i = 0; i < 64; ++i) {
+    // (resistance * i * i) >> 9, all in 32-bit wrapping arithmetic as in the
+    // original DOS binary (restunts carsetup.c aero_resistance_at).
+    int32_t prod = static_cast<int32_t>(aero_resistance) * i;
+    prod = prod * i;
+    aero_resistance_table[i] =
+        static_cast<int16_t>(static_cast<uint16_t>(prod >> 9));
+  }
   idle_torque = data[58];
   std::memcpy(torque_curve, data + 59, sizeof(torque_curve));
   field_A3 = data[163];

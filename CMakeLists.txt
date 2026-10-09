@@ -38,6 +38,7 @@ add_library(stunts3d_core STATIC
   src/assets/shape3d.cpp
   src/assets/palette.cpp
   src/physics/fixed_math.cpp
+  src/physics/car_engine.cpp
   src/world/track_mesh.cpp
   src/world/car_mesh.cpp
   src/world/shape_mesh.cpp
