@@ -35,6 +35,7 @@ add_library(stunts3d_core STATIC
   src/assets/res_file.cpp
   src/assets/car.cpp
   src/assets/compression.cpp
+  src/assets/shape3d.cpp
   src/physics/fixed_math.cpp
   src/world/track_mesh.cpp
   src/core/paths.cpp
