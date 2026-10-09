@@ -51,6 +51,18 @@ inline int surface_to_car_surface(items::Surface s) {
 
 // Height (in world units) of the ground at grid cell (x, y). Mirrors the
 // element placement in track_shapes.cpp (kElevatedHeight = 450).
+// Height (in world units) of the ground at world position. Mirrors the
+// element placement in track_shapes.cpp (kElevatedHeight = 450).
+inline int cell_ground_height_at(const Track& track, int wx, int wz) {
+  const int x = wx / 1024;
+  const int y = wz / 1024;
+  const int cx = x;
+  const int cy = y;
+  const uint8_t terr = track.terrain_at(cx, cy);
+  if (terr == 6) return 450;
+  return 0;
+}
+
 inline int cell_ground_height(const Track& track, int x, int y) {
   return track.terrain_at(x, y) == 6 ? 450 : 0;
 }

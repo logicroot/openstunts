@@ -41,6 +41,7 @@ add_library(stunts3d_core STATIC
   src/physics/car_engine.cpp
   src/physics/car_steering.cpp
   src/physics/car_motion.cpp
+  src/physics/track_collision.cpp
   src/world/track_elevation.cpp
   src/world/track_mesh.cpp
   src/world/car_mesh.cpp
