@@ -42,5 +42,3 @@ TEST(trk_loads_real_default_track) {
   }
   EXPECT_TRUE(non_blank > 0);
 }
-
-int main() { return s3d_test::run_all(); }

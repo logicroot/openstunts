@@ -1,0 +1,105 @@
+#include "game/application.h"
+
+#include <cstdio>
+
+#include "core/log.h"
+#include "game/scene.h"
+#include "render/gl.h"
+#include "render/screenshot.h"
+
+namespace s3d {
+
+Application::~Application() {
+  if (scene_) scene_->on_exit();
+  renderer_.shutdown();
+  window_.destroy();
+}
+
+bool Application::init(const Config& config, const std::string& asset_dir) {
+  config_ = config;
+  asset_dir_ = asset_dir;
+
+  WindowConfig wc;
+  wc.width = config.width;
+  wc.height = config.height;
+  wc.vsync = config.vsync;
+  wc.fullscreen = config.fullscreen;
+  wc.highdpi = config.highdpi;
+  if (!window_.create(wc)) return false;
+
+  if (!gl::load()) {
+    S3D_ERROR("failed to load required OpenGL 3.3 functions");
+    return false;
+  }
+  S3D_INFO("GL version : %s", reinterpret_cast<const char*>(glGetString(GL_VERSION)));
+  S3D_INFO("GL renderer: %s", reinterpret_cast<const char*>(glGetString(GL_RENDERER)));
+
+  if (!renderer_.init()) {
+    S3D_ERROR("renderer initialization failed");
+    return false;
+  }
+  renderer_.set_fog(glm::vec3(0.60f, 0.72f, 0.85f), 1.0f / 60000.0f);
+
+  SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER);
+  for (int i = 0; i < SDL_NumJoysticks(); ++i) {
+    if (SDL_IsGameController(i)) {
+      SDL_GameControllerOpen(i);  // kept open for its lifetime
+      break;
+    }
+  }
+  return true;
+}
+
+void Application::set_scene(std::unique_ptr<Scene> scene) {
+  if (scene_) scene_->on_exit();
+  scene_ = std::move(scene);
+  if (scene_) scene_->on_enter();
+}
+
+void Application::run() {
+  running_ = true;
+  Uint32 last_ticks = SDL_GetTicks();
+  float fps_timer = 0.0f;
+  int frames = 0;
+
+  while (running_) {
+    const Uint32 now = SDL_GetTicks();
+    double frame_seconds = static_cast<double>(now - last_ticks) / 1000.0;
+    last_ticks = now;
+
+    input_.begin_frame();
+    SDL_Event e;
+    while (SDL_PollEvent(&e) != 0) {
+      input_.handle_event(e);
+      if (scene_) scene_->handle_event(e);
+    }
+    if (input_.quit_requested()) break;
+
+    const int steps = timestep_.advance(frame_seconds);
+    for (int i = 0; i < steps && scene_; ++i) {
+      scene_->update(timestep_.step_seconds(), input_.get());
+    }
+
+    const int w = window_.drawable_width();
+    const int h = window_.drawable_height();
+    renderer_.begin_frame(w, h, glm::vec3(0.55f, 0.72f, 0.92f));
+    if (scene_) scene_->render(renderer_, w, h);
+    window_.swap();
+
+    if (!scene_) break;
+    const std::string next = scene_->next_scene();
+    if (!next.empty()) break;  // scene switching implemented in a later milestone
+
+    ++frames;
+    fps_timer += static_cast<float>(frame_seconds);
+    if (fps_timer >= 1.0f) {
+      char title[160];
+      std::snprintf(title, sizeof(title), "Stunts3D — %d fps", frames);
+      SDL_SetWindowTitle(window_.handle(), title);
+      frames = 0;
+      fps_timer = 0.0f;
+    }
+  }
+}
+
+}  // namespace s3d

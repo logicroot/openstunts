@@ -27,11 +27,18 @@ add_library(stunts3d_core STATIC
   src/render/mesh.cpp
   src/render/renderer.cpp
   src/render/screenshot.cpp
+  src/render/texture.cpp
   src/platform/window.cpp
+  src/platform/input.cpp
   src/assets/binary_reader.cpp
   src/assets/trk.cpp
+  src/assets/res_file.cpp
+  src/assets/car.cpp
   src/world/track_mesh.cpp
   src/core/paths.cpp
+  src/core/config.cpp
+  src/game/application.cpp
+  src/game/debug_track_scene.cpp
 )
 target_include_directories(stunts3d_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
