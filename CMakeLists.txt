@@ -39,6 +39,9 @@ add_library(stunts3d_core STATIC
   src/assets/palette.cpp
   src/physics/fixed_math.cpp
   src/physics/car_engine.cpp
+  src/physics/car_steering.cpp
+  src/physics/car_motion.cpp
+  src/world/track_elevation.cpp
   src/world/track_mesh.cpp
   src/world/car_mesh.cpp
   src/world/shape_mesh.cpp
@@ -48,6 +51,7 @@ add_library(stunts3d_core STATIC
   src/core/config.cpp
   src/game/application.cpp
   src/game/debug_track_scene.cpp
+  src/game/drive_scene.cpp
 )
 target_include_directories(stunts3d_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src

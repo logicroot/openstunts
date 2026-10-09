@@ -44,6 +44,35 @@ inline constexpr int kWheelContactNone = 0;
 inline constexpr int kGameFrameRateLow = 10;
 inline constexpr int kGameFrameRateNormal = 20;
 
+// Car surface types (restunts gamestate.h).
+inline constexpr int kCarSurfacePaved = 1;
+inline constexpr int kCarSurfaceDirt = 2;
+inline constexpr int kCarSurfaceIce = 3;
+inline constexpr int kCarSurfaceGrass = 4;
+inline constexpr int kCarSurfaceWater = 5;
+
+inline constexpr int kCarSteeringCentered = 0;
+inline constexpr int kCarSlidingInactive = 0;
+inline constexpr int kCarSlidingActive = 1;
+inline constexpr int kCarCollisionLatchClear = 0;
+inline constexpr int kCarCollisionLatchSet = 1;
+
+// Grip/slip behaviour selection (restunts state_internal.h).
+inline constexpr int kGripBehaviorOpponent = 0;
+inline constexpr int kGripBehaviorPlayer = 1;
+
+// Crash events (restunts crash_state.h). The reduced motion model does not
+// trigger crashes yet; the values are kept for state-field compatibility.
+inline constexpr int kCrashEventNone = 0;
+inline constexpr int kCrashEventCollision = 1;
+inline constexpr int kCrashEventWater = 2;
+
+// Per-frame car sound flags (restunts gamestate.h).
+inline constexpr int kCarSoundNone = 0;
+inline constexpr int kCarSoundEngineActive = 1;
+inline constexpr int kCarSoundSkidPaved = 2;
+inline constexpr int kCarSoundSkidOffroad = 4;
+
 struct CarState {
   Vec3Long car_position;
   Vec3Long car_previous_position;

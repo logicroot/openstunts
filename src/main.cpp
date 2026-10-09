@@ -8,6 +8,7 @@
 #include "core/paths.h"
 #include "game/application.h"
 #include "game/debug_track_scene.h"
+#include "game/drive_scene.h"
 
 using namespace s3d;
 
@@ -18,6 +19,7 @@ int main(int argc, char** argv) {
   std::string screenshot_path;
   int screenshot_frame = 0;
   bool top_down = false;
+  bool drive = false;
 
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
@@ -29,13 +31,15 @@ int main(int argc, char** argv) {
       if (screenshot_frame == 0) screenshot_frame = 3;
     } else if (a == "--frames" && i + 1 < argc) {
       screenshot_frame = std::atoi(argv[++i]);
+    } else if (a == "--drive") {
+      drive = true;
     } else if (a == "--top") {
       top_down = true;
     } else if (a == "--help" || a == "-h") {
       std::printf(
           "Stunts3D — 3D reimplementation of Stunts\n"
           "usage: stunts3d [--assets DIR] [--track FILE.trk] [--config FILE]\n"
-          "                [--screenshot out.png] [--frames N] [--top]\n");
+          "                [--screenshot out.png] [--frames N] [--top] [--drive]\n");
       return 0;
     } else {
       S3D_WARN("unknown argument: %s", a.c_str());
@@ -59,10 +63,16 @@ int main(int argc, char** argv) {
   Application app;
   if (!app.init(config, asset_dir)) return 1;
 
-  auto scene = std::make_unique<DebugTrackScene>(std::move(track), track_path, asset_dir);
-  scene->set_top_down(top_down);
-  if (!screenshot_path.empty()) scene->request_screenshot(screenshot_path, screenshot_frame);
-  app.set_scene(std::move(scene));
+  if (drive) {
+    auto scene = std::make_unique<DriveScene>(std::move(track), asset_dir);
+    if (!screenshot_path.empty()) scene->request_screenshot(screenshot_path, screenshot_frame);
+    app.set_scene(std::move(scene));
+  } else {
+    auto scene = std::make_unique<DebugTrackScene>(std::move(track), track_path, asset_dir);
+    scene->set_top_down(top_down);
+    if (!screenshot_path.empty()) scene->request_screenshot(screenshot_path, screenshot_frame);
+    app.set_scene(std::move(scene));
+  }
   app.run();
 
   return 0;

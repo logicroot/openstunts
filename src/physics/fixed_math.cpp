@@ -177,9 +177,9 @@ void mat_rot_x(int angle, Mat3* out) {
 void mat_rot_y(int angle, Mat3* out) {
   const int c = cos_fast(static_cast<unsigned short>(angle));
   const int s = sin_fast(static_cast<unsigned short>(angle));
-  out->m[0] = c;      out->m[1] = 0;           out->m[2] = -s;
+  out->m[0] = c;      out->m[1] = 0;           out->m[2] = s;
   out->m[3] = 0;      out->m[4] = 0x4000;      out->m[5] = 0;
-  out->m[6] = s;      out->m[7] = 0;           out->m[8] = c;
+  out->m[6] = -s;     out->m[7] = 0;           out->m[8] = c;
 }
 
 void mat_rot_z(int angle, Mat3* out) {
