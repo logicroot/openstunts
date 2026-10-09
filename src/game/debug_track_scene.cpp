@@ -10,6 +10,9 @@
 #include "core/paths.h"
 #include "render/renderer.h"
 #include "render/screenshot.h"
+#include "world/car_mesh.h"
+#include "world/mesh_builder.h"
+#include "world/shape_mesh.h"
 #include "world/track_mesh.h"
 #include "world/track_shapes.h"
 #include "world/world_units.h"
@@ -37,10 +40,23 @@ bool DebugTrackScene::on_enter() {
   }
   if (!lib.shapes().empty()) {
     world::TrackShapeStats stats;
-    mesh_ = world::build_track_shape_mesh(track_, lib, &stats);
+    MeshBuilder mb;
+    world::build_track_shape_geometry(track_, lib, mb, &stats);
     S3D_INFO("track shapes: ground=%d terrain=%d elements=%d overlays=%d missing=%d",
              stats.ground_cells, stats.terrain_shapes, stats.elements, stats.overlays,
              stats.missing_shapes);
+
+    // Debug: place the player car at the start/finish cell (item 1) so its
+    // size can be compared against the road. The racing car is `car1` inside
+    // `ST<ID>.P3S`; see car_mesh.h for the scale notes.
+    ShapeLibrary car_lib;
+    if (!asset_dir_.empty() && world::load_car_archive(asset_dir_, "COUN", &car_lib)) {
+      const glm::vec3 car_pos(world::cell_center_x(7), 0.0f, world::cell_center_z(5));
+      world::append_car_model(mb, car_lib, world::shape_model(car_pos, 0.0f),
+                              glm::vec4(0.80f, 0.15f, 0.12f, 1.0f));
+      S3D_INFO("player car: %s at cell (7,5)", car_lib.find("car1") ? "car1" : "car2");
+    }
+    mesh_ = mb.to_mesh();
   } else {
     S3D_WARN("no GAME1/GAME2 shapes found; falling back to placeholder geometry");
     mesh_ = build_track_mesh(track_);
@@ -50,10 +66,14 @@ bool DebugTrackScene::on_enter() {
   const float cz = world::cell_center_z(world::kTrackSize / 2);
   if (top_down_) {
     camera_.position = glm::vec3(cx, 18000.0f, cz + 3000.0f);
+    aim_at(camera_, glm::vec3(cx, 0.0f, cz));
   } else {
-    camera_.position = glm::vec3(cx - 9000.0f, 6500.0f, cz - 12000.0f);
+    // Debug close-up of the start/finish cell so the car can be compared with
+    // the road surface.
+    const glm::vec3 car(world::cell_center_x(7), 0.0f, world::cell_center_z(5));
+    camera_.position = car + glm::vec3(-1400.0f, 700.0f, -1800.0f);
+    aim_at(camera_, car + glm::vec3(0.0f, 60.0f, 0.0f));
   }
-  aim_at(camera_, glm::vec3(cx, 0.0f, cz));
   S3D_INFO("debug scene: %s", name_.c_str());
   return true;
 }

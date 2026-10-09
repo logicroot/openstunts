@@ -7,7 +7,10 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
 
+#include "assets/compression.h"
+#include "assets/res_file.h"
 #include "assets/trk.h"
 #include "core/log.h"
 #include "core/paths.h"
@@ -51,6 +54,24 @@ void dump_trk(const std::string& path) {
               t.unknown_tail);
 }
 
+void dump_p3s(const std::string& path) {
+  std::vector<uint8_t> raw;
+  if (!decompress_file(path, &raw)) {
+    std::fprintf(stderr, "cannot decompress '%s'\n", path.c_str());
+    return;
+  }
+  ResFile res;
+  if (!res.load(raw.data(), raw.size())) {
+    std::fprintf(stderr, "'%s' is not a resource archive\n", path.c_str());
+    return;
+  }
+  std::printf("%s: %zu bytes decompressed, %zu resources\n", path.c_str(), raw.size(),
+              res.chunks().size());
+  for (const ResFile::Chunk& c : res.chunks()) {
+    std::printf("  %-8s %u\n", c.id.c_str(), c.size);
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -58,6 +79,7 @@ int main(int argc, char** argv) {
     std::fprintf(stderr,
                  "usage:\n"
                  "  s3d_dump trk <file.trk>\n"
+                 "  s3d_dump p3s <file.p3s>\n"
                  "  s3d_dump dir\n");
     return 2;
   }
@@ -70,6 +92,10 @@ int main(int argc, char** argv) {
     const std::string dir = find_asset_dir();
     std::printf("%s\n", dir.empty() ? "(not found)" : dir.c_str());
     return dir.empty() ? 1 : 0;
+  }
+  if (cmd == "p3s" && argc >= 3) {
+    dump_p3s(argv[2]);
+    return 0;
   }
   std::fprintf(stderr, "unknown command: %s\n", cmd.c_str());
   return 2;

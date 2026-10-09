@@ -32,4 +32,9 @@ void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
 // and rotates `yaw_deg` degrees about the world Y axis.
 glm::mat4 shape_model(const glm::vec3& translation, float yaw_deg);
 
+// Default paint-index -> colour mapping for track/scenery shapes. The original
+// material table is not loaded yet, so common indices are mapped to sensible
+// modern colours and everything else gets a stable grey.
+glm::vec4 track_paint_color(uint8_t paint);
+
 }  // namespace s3d::world

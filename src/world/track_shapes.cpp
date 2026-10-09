@@ -18,40 +18,6 @@ constexpr float kElevatedHeight = 450.0f;  // hillHeightConsts[1]
 constexpr float kTileSize = 1024.0f;
 constexpr float kHalf = 512.0f;
 
-// ---- Palette ---------------------------------------------------------------
-// Stunts paint indices are resolved through the original material table, which
-// we do not load yet. Map the common ones to sensible modern colours and give
-// unknown indices a stable grey so the result still reads as 3D geometry.
-glm::vec4 paint_color(uint8_t p) {
-  switch (p) {
-    case 19: return {0.30f, 0.30f, 0.33f, 1.0f};  // asphalt
-    case 25: return {0.28f, 0.28f, 0.31f, 1.0f};
-    case 28: return {0.26f, 0.26f, 0.29f, 1.0f};
-    case 22: return {0.31f, 0.31f, 0.34f, 1.0f};
-    case 23: return {0.35f, 0.35f, 0.38f, 1.0f};
-    case 24: return {0.27f, 0.27f, 0.30f, 1.0f};
-    case 21: case 27: case 30: return {0.92f, 0.92f, 0.90f, 1.0f};  // markings
-    case 35: return {0.78f, 0.16f, 0.13f, 1.0f};  // red curb
-    case 36: return {0.90f, 0.90f, 0.88f, 1.0f};  // white curb
-    case 31: case 32: case 33: return {0.62f, 0.63f, 0.66f, 1.0f};  // rails
-    case 10: return {0.42f, 0.27f, 0.14f, 1.0f};  // trunk
-    case 98: return {0.22f, 0.46f, 0.19f, 1.0f};  // foliage
-    case 99: return {0.16f, 0.37f, 0.14f, 1.0f};
-    case 100: return {0.15f, 0.38f, 0.68f, 1.0f};  // water
-    case 101: case 104: case 105: return {0.34f, 0.56f, 0.26f, 1.0f};  // grass
-    case 102: case 103: return {0.29f, 0.50f, 0.22f, 1.0f};  // slope grass
-    case 0: return {0.52f, 0.18f, 0.15f, 1.0f};  // barn
-    case 4: return {0.80f, 0.78f, 0.72f, 1.0f};
-    case 6: return {0.40f, 0.27f, 0.15f, 1.0f};
-    case 12: return {0.58f, 0.44f, 0.29f, 1.0f};
-    case 15: return {0.85f, 0.85f, 0.83f, 1.0f};
-    default: {
-      const float v = 0.40f + 0.012f * static_cast<float>(p % 9);
-      return {v, v, v * 1.03f, 1.0f};
-    }
-  }
-}
-
 // ---- Transforms ------------------------------------------------------------
 
 // Builds a translation + fixed-point yaw (1/1024 turn) matrix matching the
@@ -161,7 +127,7 @@ void build_track_shape_geometry(const Track& track, const ShapeLibrary& lib,
         const Shape3D* s = lookup(lib, ts.shape);
         const float height = (t == 6) ? kElevatedHeight : 0.0f;
         if (s != nullptr) {
-          append_shape(mb, *s, fixed_model({cx, height, cz}, ts.rot_y), paint_color);
+          append_shape(mb, *s, fixed_model({cx, height, cz}, ts.rot_y), track_paint_color);
           ++local.terrain_shapes;
         } else {
           ++local.missing_shapes;
@@ -190,7 +156,7 @@ void build_track_shape_geometry(const Track& track, const ShapeLibrary& lib,
 
       const Shape3D* s = lookup(lib, def.shape);
       if (s != nullptr) {
-        append_shape(mb, *s, fixed_model(pos, def.rot_y), paint_color);
+        append_shape(mb, *s, fixed_model(pos, def.rot_y), track_paint_color);
         ++local.elements;
       } else {
         ++local.missing_shapes;
@@ -202,7 +168,7 @@ void build_track_shape_geometry(const Track& track, const ShapeLibrary& lib,
         if (overlay_shape(def.overlay, &oshape, &orot)) {
           const Shape3D* os = lookup(lib, oshape);
           if (os != nullptr) {
-            append_shape(mb, *os, fixed_model(pos, orot), paint_color);
+            append_shape(mb, *os, fixed_model(pos, orot), track_paint_color);
             ++local.overlays;
           } else {
             ++local.missing_shapes;
