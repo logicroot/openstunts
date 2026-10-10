@@ -153,7 +153,41 @@ WallContact resolve_wall_contact(const CollisionSample& sample, int plane_distan
 
   contact.hit = true;
   contact.remaining_travel = var_f4;
+  contact.wall_frame_angle = var_ee;
   return contact;
+}
+
+WallCrash compute_wall_crash(int16_t yaw, int16_t wall_frame_angle, uint16_t actual_speed) {
+  WallCrash crash;
+  // loc_1546E: wall-relative heading folded into [0, 0x100]. `var_138` records
+  // which side of the fold the angle landed on.
+  int32_t si = static_cast<int32_t>(wrap_sub(wrap_negate(yaw), wall_frame_angle)) & 0x3FF;
+  int32_t mirrored = 0;
+  if (si > 0x100) {
+    si = 0x400 - si;
+    mirrored = 1;
+  }
+
+  // loc_154CA: var_190 = ((si * 0x46) sar 8 - 0x64) negated, packed into the
+  // high byte. The original `imul` is 16-bit and wraps, so use wrap_mul.
+  const int16_t product = wrap_mul(static_cast<int16_t>(si), 0x46);
+  const int16_t scaled = sar16(product, 8);
+  const int16_t biased = wrap_sub(scaled, 0x64);
+  const int16_t negated = wrap_negate(biased);
+  const uint16_t threshold = static_cast<uint16_t>(static_cast<uint16_t>(negated & 0xFF) << 8);
+  if (actual_speed <= threshold) return crash;
+
+  // loc_154F8..loc_154FA: car_36MwhlAngle = var_138 ? -(si << 1) : (si << 1).
+  crash.triggered = true;
+  const int16_t kick = static_cast<int16_t>(static_cast<uint16_t>(si) << 1);
+  crash.heading_kick = mirrored != 0 ? wrap_negate(kick) : kick;
+  return crash;
+}
+
+void apply_crash_control(const CarState& car, uint8_t* input_flags) {
+  if (input_flags == nullptr || car.car_crashBmpFlag == kCrashEventNone) return;
+  // player_op: `arg_carInputByte = 2` (brake) while car_crashBmpFlag != 0.
+  *input_flags = kInputBrake;
 }
 
 int16_t update_wheel_suspension(CarState* car, int16_t wheel_index, int16_t contact_delta) {
@@ -339,9 +373,9 @@ void step_car_motion(CarState* car, const CarSpec& spec, int frames_per_sec,
   // ---- Wall collision response (stateply.c loc_15257..loc_15599) -----------
   // build_track_object resolves the active wall for each tile; here we sweep
   // each wheel across the wall line and, on a crossing inside the wall's height
-  // band, push the wheels back along the wall and drain the blocked fraction of
-  // the car's speed. The crash state machine (restunts `update_crash_state(1)`)
-  // is not ported yet, so only the geometry + speed loss are reproduced.
+  // band, push the wheels back along the wall. A hard enough hit also enters
+  // the crash state (compute_wall_crash); the original then slows the car
+  // through the forced-brake crash control rather than draining speed here.
   if (use_track_collision && travel != 0) {
     for (int i = 0; i < kCarWheelCount; ++i) {
       const fixed::Vec3 pre_word{static_cast<int16_t>(previous[i].x >> kWorldToLongShift),
@@ -385,21 +419,15 @@ void step_car_motion(CarState* car, const CarSpec& spec, int frames_per_sec,
         current[w].z = previous[w].z + static_cast<int16_t>(corr_z + contact.deflection.z);
       }
 
-      // Drain the blocked fraction of the car's speed. The reference instead
-      // sets car_36MwhlAngle and calls update_crash_state(1), which enters the
-      // crash state (slow-motion + spin) without itself zeroing the speed; that
-      // state machine is not ported yet, so we scale the speed by the surviving
-      // travel as a stand-in that keeps the car from creeping through the wall.
-      if (contact.remaining_travel <= 0) {
-        car->car_actual_speed = 0;
-        car->car_rev_speed = 0;
-      } else if (contact.remaining_travel < travel) {
-        car->car_actual_speed = static_cast<uint16_t>(
-            static_cast<uint32_t>(car->car_actual_speed) *
-            static_cast<uint32_t>(contact.remaining_travel) / static_cast<uint32_t>(travel));
-        car->car_rev_speed = static_cast<uint16_t>(
-            static_cast<uint32_t>(car->car_rev_speed) *
-            static_cast<uint32_t>(contact.remaining_travel) / static_cast<uint32_t>(travel));
+      // Crash threshold (stateply.c loc_154CA..loc_154FA): a hard enough hit
+      // kicks the wheel-travel heading and enters the crash state, which the
+      // original advances through player_op's forced brake rather than by
+      // draining speed here.
+      const WallCrash crash =
+          compute_wall_crash(work_yaw, contact.wall_frame_angle, car->car_actual_speed);
+      if (crash.triggered) {
+        car->car_velocity_heading_offset = crash.heading_kick;
+        car->car_crashBmpFlag = kCrashEventCollision;
       }
       break;  // the reference resolves a single wall per tick
     }

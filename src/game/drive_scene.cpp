@@ -248,6 +248,10 @@ void DriveScene::physics_tick(const Controls& controls) {
   if (controls.steer > 0.05f) input_flags |= physics::kInputSteerRight;
   if (controls.steer < -0.05f) input_flags |= physics::kInputSteerLeft;
 
+  // A crashed car ignores the player: the original player_op forces the brake
+  // until the car stops (state.c).
+  physics::apply_crash_control(car_, &input_flags);
+
   physics::update_car_speed(input_flags, spec_, &car_, physics::kGameFrameRateNormal);
   physics::update_player_steering(input_flags, &car_, physics::kGameFrameRateNormal);
   physics::update_grip(&car_, spec_);

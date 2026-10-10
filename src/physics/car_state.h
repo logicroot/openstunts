@@ -61,8 +61,9 @@ inline constexpr int kCarCollisionLatchSet = 1;
 inline constexpr int kGripBehaviorOpponent = 0;
 inline constexpr int kGripBehaviorPlayer = 1;
 
-// Crash events (restunts crash_state.h). The reduced motion model does not
-// trigger crashes yet; the values are kept for state-field compatibility.
+// Crash events (restunts crash_state.h). The reduced motion model triggers
+// kCrashEventCollision on a hard wall hit (car_crashBmpFlag); the other values
+// are kept for state-field compatibility.
 inline constexpr int kCrashEventNone = 0;
 inline constexpr int kCrashEventCollision = 1;
 inline constexpr int kCrashEventWater = 2;

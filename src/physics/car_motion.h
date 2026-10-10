@@ -10,8 +10,9 @@
 // under each wheel (ramps, banked roads, elevated terrain) via
 // build_track_object / plane_signed_distance and travels along it via
 // transform_wheel_travel_to_world. Wall collisions are resolved by sweeping
-// each wheel across the active wall (resolve_wall_contact); loop/banked
-// steering is still deferred.
+// each wheel across the active wall (resolve_wall_contact); a hard enough hit
+// enters the crash state (compute_wall_crash). Loop/banked steering is still
+// deferred.
 
 #include <cstdint>
 #include <functional>
@@ -60,6 +61,9 @@ struct WallContact {
   int32_t remaining_travel = 0;
   // vec_1C: world-space nudge applied to every wheel along the wall.
   fixed::Vec3 deflection;
+  // var_EE: the wall-frame heading used for the deflection and fed to the crash
+  // threshold (compute_wall_crash).
+  int16_t wall_frame_angle = 0;
 };
 
 // Resolves a wheel crossing the active wall described by `sample`.
@@ -70,5 +74,32 @@ struct WallContact {
 WallContact resolve_wall_contact(const CollisionSample& sample, int plane_distance,
                                  const fixed::Vec3& pre_word, const fixed::Vec3& post_word,
                                  int16_t travel, int16_t yaw, int16_t pitch, int16_t roll);
+
+// Result of the wall crash threshold (restunts stateply.c loc_1546E..loc_154FA):
+// whether the impact is hard enough to enter the crash state, and the heading
+// kick applied to the wheels when it does.
+struct WallCrash {
+  bool triggered = false;
+  // car_36MwhlAngle / car_velocity_heading_offset: wheel-travel heading offset
+  // (±(si << 1)) that makes the car spin away from the wall.
+  int16_t heading_kick = 0;
+};
+
+// Tests a wall hit against the crash speed threshold. `yaw` is the car heading
+// and `wall_frame_angle` the WallContact wall-frame angle, both in 1/1024-turn
+// units; `actual_speed` is car_actual_speed (car_speed2). The original builds
+// the threshold with a 16-bit `imul` that wraps, so the port reproduces it with
+// wrap_mul. Exposed for tests.
+WallCrash compute_wall_crash(int16_t yaw, int16_t wall_frame_angle, uint16_t actual_speed);
+
+// Applies the crash control override from the original `player_op` (state.c):
+// once car_crashBmpFlag is set the player input is replaced with the brake and
+// steering is ignored, so the car decelerates to a stop. `input_flags` is
+// updated in place.
+//
+// Reduced model: the crash state's slow-motion (game_frames_per_sec =
+// framespersec << 2), its windscreen-crack animation (state_op_unk) and the
+// race-layer recovery/penalty (restunts.c) are not modelled.
+void apply_crash_control(const CarState& car, uint8_t* input_flags);
 
 }  // namespace s3d::physics

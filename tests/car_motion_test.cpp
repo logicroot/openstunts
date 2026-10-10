@@ -88,6 +88,7 @@ CarState parked_car(const CarSpec& spec) {
 
 // One 20 Hz tick of the full drive-scene pipeline.
 void pipeline_tick(CarState* car, const CarSpec& spec, uint8_t flags) {
+  apply_crash_control(*car, &flags);
   update_car_speed(flags, spec, car, kGameFrameRateNormal);
   update_player_steering(flags, car, kGameFrameRateNormal);
   update_grip(car, spec);
@@ -326,8 +327,8 @@ TEST(motion_track_collision_drives_real_track_without_sinking) {
 
   int ground_ticks = 0;
   for (int i = 0; i < 400; ++i) {
-    const uint8_t flags =
-        kInputAccelerate | (((i / 40) % 2) ? kInputSteerLeft : kInputSteerRight);
+    uint8_t flags = kInputAccelerate | (((i / 40) % 2) ? kInputSteerLeft : kInputSteerRight);
+    apply_crash_control(car, &flags);
     update_car_speed(flags, spec, &car, kGameFrameRateNormal);
     update_player_steering(flags, &car, kGameFrameRateNormal);
     update_grip(&car, spec);
@@ -344,6 +345,8 @@ TEST(motion_track_collision_drives_real_track_without_sinking) {
   // check that step_car_motion reaches resolve_wall_contact). The latch is
   // sticky, so it stays set once the wall response fires.
   EXPECT_EQ(car.car_collision_latch, kCarCollisionLatchSet);
+  // At least one of those wall hits is hard enough to enter the crash state.
+  EXPECT_EQ(car.car_crashBmpFlag, kCrashEventCollision);
 }
 
 // ---------------------------------------------------------------------------
@@ -427,4 +430,60 @@ TEST(wall_contact_ignores_zero_travel_and_missing_wall) {
   EXPECT_TRUE(!(resolve_wall_contact(wall, 0, pre, post, 0, 0, 0, 0).hit));
   wall.wall_index = -1;
   EXPECT_TRUE(!(resolve_wall_contact(wall, 0, pre, post, 375, 0, 0, 0).hit));
+}
+
+// ---------------------------------------------------------------------------
+// compute_wall_crash (stateply.c loc_1546E..loc_154FA)
+//
+// si folds the wall/car heading difference into [0, 0x100]; var_190 packs
+// ((si * 0x46) sar 8 - 0x64) negated into the high byte (a 16-bit `imul` that
+// wraps). A hit crashes when car_actual_speed > var_190.
+// ---------------------------------------------------------------------------
+
+TEST(wall_crash_below_threshold_does_not_trigger) {
+  // yaw 0x300 vs wall-frame 0 -> si = 0x100, var_138 = 0, threshold = 30 << 8.
+  const WallCrash c = compute_wall_crash(0x300, 0, 30 << 8);
+  EXPECT_TRUE(!c.triggered);
+  EXPECT_EQ(c.heading_kick, 0);
+}
+
+TEST(wall_crash_above_threshold_kicks_heading) {
+  const WallCrash c = compute_wall_crash(0x300, 0, (30 << 8) + 1);
+  EXPECT_TRUE(c.triggered);
+  // var_138 == 0 branch: kick = +(si << 1) = +0x200.
+  EXPECT_EQ(c.heading_kick, 512);
+}
+
+TEST(wall_crash_mirrored_branch_negates_kick) {
+  // yaw 0 vs wall-frame 0x100 also folds to si = 0x100, but from the far side
+  // (var_138 = 1), so the kick is negated.
+  const WallCrash c = compute_wall_crash(0, 0x100, (30 << 8) + 1);
+  EXPECT_TRUE(c.triggered);
+  EXPECT_EQ(c.heading_kick, -512);
+}
+
+TEST(wall_crash_reproduces_16bit_multiply_wrap) {
+  // yaw 0 vs wall-frame 0x200 folds to si = 0x200. 0x200 * 0x46 = 0x8C00, whose
+  // signed value is negative; sar 8 gives -0x74, so var_190 = 0xD8 << 8.
+  const uint16_t threshold = static_cast<uint16_t>(0xD8 << 8);
+  EXPECT_TRUE(!compute_wall_crash(0, 0x200, threshold).triggered);
+  const WallCrash c = compute_wall_crash(0, 0x200, static_cast<uint16_t>(threshold + 1));
+  EXPECT_TRUE(c.triggered);
+  EXPECT_EQ(c.heading_kick, -1024);
+}
+
+// ---------------------------------------------------------------------------
+// apply_crash_control (state.c player_op)
+// ---------------------------------------------------------------------------
+
+TEST(crash_control_forces_brake_until_recovers) {
+  CarState car;
+  uint8_t flags = kInputAccelerate | kInputSteerRight;
+  apply_crash_control(car, &flags);
+  EXPECT_EQ(flags, kInputAccelerate | kInputSteerRight);  // untouched while healthy
+
+  car.car_crashBmpFlag = kCrashEventCollision;
+  flags = kInputAccelerate | kInputSteerLeft;
+  apply_crash_control(car, &flags);
+  EXPECT_EQ(flags, kInputBrake);
 }
