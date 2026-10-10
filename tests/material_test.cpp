@@ -42,6 +42,15 @@ TEST(material_patterned_matches_reference) {
   EXPECT_TRUE(!material_patterned(21));
 }
 
+TEST(material_transparent_matches_reference) {
+  // Material 118 is the "windmill animation mask": the original lists it as
+  // pattern "Transparent" with no palette entry, so it must draw nothing.
+  EXPECT_TRUE(material_transparent(118));
+  EXPECT_TRUE(!material_transparent(113));  // windmill sail
+  EXPECT_TRUE(!material_transparent(0));
+  EXPECT_TRUE(!material_transparent(19));
+}
+
 TEST(material_color_samples_vga_palette) {
   const std::string dir = find_asset_dir();
   if (dir.empty()) {

@@ -15,6 +15,7 @@
 #include "physics/track_collision.h"
 #include "render/camera.h"
 #include "render/mesh.h"
+#include "world/track_shapes.h"
 
 namespace s3d {
 
@@ -54,7 +55,13 @@ class DriveScene : public Scene {
   physics::TrackCollision collision_;  // element planes/walls from GAME.PRE
   Palette palette_;                    // VGA colours for track materials
 
-  Mesh track_mesh_;
+  Mesh track_mesh_;  // static terrain + non-animated elements
+  // Animated objects (windmill sails, flashing sign, ...) prebuilt for each of
+  // the 4 paint phases; the game frame selects one to draw.
+  Mesh animated_meshes_[world::kTrackAnimationPhases];
+  Mesh animated_lines_[world::kTrackAnimationPhases];
+  int game_frame_ = 0;  // advances with the 20 Hz physics ticks
+
   Mesh car_mesh_;
   Camera camera_;
 

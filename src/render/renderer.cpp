@@ -99,4 +99,17 @@ void Renderer::draw_world(const Mesh& mesh, const Camera& camera,
   mesh.draw();
 }
 
+void Renderer::draw_world_lines(const Mesh& mesh, const Camera& camera,
+                                const glm::mat4& model) {
+  if (mesh.empty()) return;
+  world_shader_.use();
+  world_shader_.set_mat4("u_model", model);
+  world_shader_.set_mat4("u_view", camera.view());
+  world_shader_.set_mat4("u_proj", camera.projection(current_aspect_));
+  world_shader_.set_vec3("u_light_dir", light_dir_);
+  world_shader_.set_vec4("u_fog_color", glm::vec4(fog_color_, 1.0f));
+  world_shader_.set_float("u_fog_density", fog_density_);
+  mesh.draw_lines();
+}
+
 }  // namespace s3d

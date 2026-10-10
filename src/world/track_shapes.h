@@ -27,15 +27,26 @@ namespace s3d::world {
 struct TrackShapeStats {
   int ground_cells = 0;
   int terrain_shapes = 0;
-  int elements = 0;
+  int elements = 0;      // placed objects that never change appearance
   int overlays = 0;
+  int animated = 0;      // placed objects whose paint cycle (surface == 0xFF)
   int missing_shapes = 0;
 };
+
+// Number of distinct paint slots an animated object cycles through per loop.
+inline constexpr int kTrackAnimationPhases = 4;
+
+// Paint slot for animated objects at a given game frame. Mirrors the original
+// `byte_3C0C6[game_frame & 15]` = {0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3}: a 0..3
+// phase that advances every four frames. Objects with `surface == 0xFF`
+// (windmill sails, Joe's flashing sign, ...) use this as their material slot.
+int track_animation_phase(int game_frame);
 
 // Builds CPU-side geometry for `track` into `out`. `lib` must contain the GAME1
 // (elements) and GAME2 (scenery/terrain) shape archives. This never touches the
 // GPU, so it is safe to call in headless tests. Colours come from the built-in
-// fallback table (world/shape_mesh.h track_paint_color).
+// fallback table (world/shape_mesh.h track_paint_color). Animated objects are
+// built at phase 0.
 void build_track_shape_geometry(const Track& track, const ShapeLibrary& lib,
                                 MeshBuilder& out, TrackShapeStats* stats = nullptr);
 
@@ -45,6 +56,28 @@ void build_track_shape_geometry(const Track& track, const ShapeLibrary& lib,
 void build_track_shape_geometry(const Track& track, const ShapeLibrary& lib,
                                 MeshBuilder& out, const Palette& palette,
                                 TrackShapeStats* stats = nullptr);
+
+// Static subset: terrain plus every element that never changes appearance.
+// Animated objects (surface == 0xFF) are omitted and drawn from
+// build_track_animated_geometry() instead. `palette` colours as above.
+void build_track_static_geometry(const Track& track, const ShapeLibrary& lib,
+                                 MeshBuilder& out, const Palette& palette,
+                                 TrackShapeStats* stats = nullptr);
+void build_track_static_geometry(const Track& track, const ShapeLibrary& lib,
+                                 MeshBuilder& out, TrackShapeStats* stats = nullptr);
+
+// Animated subset for one `phase` (0 .. kTrackAnimationPhases-1): the windmill
+// sails, the flashing diner sign and similar objects. Callers rebuild/select
+// this as the phase advances. Line primitives (the diner sign) are appended to
+// `lines` when it is non-null, for drawing as GL_LINES.
+void build_track_animated_geometry(const Track& track, const ShapeLibrary& lib,
+                                   MeshBuilder& out, const Palette& palette, int phase,
+                                   TrackShapeStats* stats = nullptr,
+                                   MeshBuilder* lines = nullptr);
+void build_track_animated_geometry(const Track& track, const ShapeLibrary& lib,
+                                   MeshBuilder& out, int phase,
+                                   TrackShapeStats* stats = nullptr,
+                                   MeshBuilder* lines = nullptr);
 
 // Convenience wrappers that upload the geometry to a GPU mesh.
 Mesh build_track_shape_mesh(const Track& track, const ShapeLibrary& lib,

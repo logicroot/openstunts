@@ -32,6 +32,12 @@ uint8_t material_color_index(uint8_t material);
 // patterned materials, so callers may ignore this.
 bool material_patterned(uint8_t material);
 
+// True when the material draws nothing. Material 118 is the "windmill
+// animation mask" — the original renders it as a transparent stipple used to
+// hide the sail positions that are not currently lit; there is no palette
+// entry for it. Polygons using it must be skipped.
+bool material_transparent(uint8_t material);
+
 // Flat opaque RGBA for `material` sampled from `palette`.
 glm::vec4 material_color(uint8_t material, const Palette& palette);
 

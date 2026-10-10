@@ -42,6 +42,14 @@ bool material_patterned(uint8_t material) {
   return material < kMaterialCount && kMaterialPatternList[material] != 0;
 }
 
+// Material 118 ("windmill animation mask") is listed by the original material
+// table as pattern "Transparent" with no palette entry; the windmill's sail
+// polygons switch between material 113 (the sail) and 118 (this mask) as the
+// animation phase advances, so 118 must never paint anything.
+constexpr uint8_t kTransparentMaterial = 118;
+
+bool material_transparent(uint8_t material) { return material == kTransparentMaterial; }
+
 glm::vec4 material_color(uint8_t material, const Palette& palette) {
   const uint8_t idx = material_color_index(material);
   return glm::vec4(static_cast<float>(palette.rgb8[idx][0]) / 255.0f,

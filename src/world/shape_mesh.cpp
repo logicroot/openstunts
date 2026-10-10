@@ -37,7 +37,7 @@ void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
 }
 
 void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
-                  const PaintColorFn& color_for) {
+                  const PaintColorFn& color_for, int material, MeshBuilder* line_out) {
   // Pre-transform all vertices once.
   std::vector<glm::vec3> pts(shape.vertices.size());
   for (size_t i = 0; i < shape.vertices.size(); ++i) {
@@ -45,11 +45,31 @@ void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
   }
 
   for (const auto& prim : shape.primitives) {
-    if (prim.kind != PrimKind::Polygon) continue;
-    if (prim.indices.size() < 3) continue;
-    const uint8_t paint = prim.paint.empty() ? 0 : prim.paint[0];
+    // Select this primitive's paint byte for the requested material slot. The
+    // original clamps an out-of-range material to slot 0.
+    int slot = material;
+    if (slot < 0) slot = 0;
+    uint8_t paint = 0;
+    if (!prim.paint.empty()) {
+      if (slot >= static_cast<int>(prim.paint.size())) slot = 0;
+      paint = prim.paint[static_cast<size_t>(slot)];
+    }
     const glm::vec4 color = color_for(paint);
     if (color.a <= 0.0f) continue;
+
+    if (prim.kind == PrimKind::Line) {
+      if (line_out == nullptr || prim.indices.size() < 2) continue;
+      for (size_t i = 0; i + 1 < prim.indices.size(); i += 2) {
+        const uint8_t a = prim.indices[i];
+        const uint8_t b = prim.indices[i + 1];
+        if (a >= pts.size() || b >= pts.size()) continue;
+        line_out->add_vertex(pts[a], glm::vec3(0.0f, 1.0f, 0.0f), color);
+        line_out->add_vertex(pts[b], glm::vec3(0.0f, 1.0f, 0.0f), color);
+      }
+      continue;
+    }
+    if (prim.kind != PrimKind::Polygon) continue;
+    if (prim.indices.size() < 3) continue;
 
     std::vector<glm::vec3> poly;
     poly.reserve(prim.indices.size());

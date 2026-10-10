@@ -134,20 +134,41 @@ bool DriveScene::on_enter() {
     lib.load_p3s(path_join(asset_dir_, "GAME2.P3S"));
   }
   if (!lib.shapes().empty()) {
+    const bool have_palette =
+        !asset_dir_.empty() && load_vga_palette(path_join(asset_dir_, "SDMAIN.PVS"), &palette_);
+    if (!have_palette) {
+      S3D_WARN("SDMAIN.PVS palette not found; using fallback track colours");
+    }
+
+    // Static terrain and non-animated elements.
     world::TrackShapeStats stats;
     MeshBuilder mb;
-    // Colours come from the real material table sampled from the VGA palette
-    // (SDMAIN.PVS `!pal`); fall back to the built-in table if it is missing.
-    if (!asset_dir_.empty() && load_vga_palette(path_join(asset_dir_, "SDMAIN.PVS"), &palette_)) {
-      world::build_track_shape_geometry(track_, lib, mb, palette_, &stats);
+    if (have_palette) {
+      world::build_track_static_geometry(track_, lib, mb, palette_, &stats);
     } else {
-      S3D_WARN("SDMAIN.PVS palette not found; using fallback track colours");
-      world::build_track_shape_geometry(track_, lib, mb, &stats);
+      world::build_track_static_geometry(track_, lib, mb, &stats);
     }
     S3D_INFO("drive track: ground=%d terrain=%d elements=%d overlays=%d missing=%d",
              stats.ground_cells, stats.terrain_shapes, stats.elements, stats.overlays,
              stats.missing_shapes);
     track_mesh_ = mb.to_mesh();
+
+    // Animated objects (windmill sails, Joe's flashing sign, ...), one mesh per
+    // paint phase. The original cycles byte_3C0C6[game_frame & 15] over 0..3.
+    world::TrackShapeStats anim_stats;
+    for (int phase = 0; phase < world::kTrackAnimationPhases; ++phase) {
+      MeshBuilder amb;
+      MeshBuilder alb;
+      if (have_palette) {
+        world::build_track_animated_geometry(track_, lib, amb, palette_, phase, &anim_stats, &alb);
+      } else {
+        world::build_track_animated_geometry(track_, lib, amb, phase, &anim_stats, &alb);
+      }
+      animated_meshes_[phase] = amb.to_mesh();
+      animated_lines_[phase] = alb.to_mesh();
+    }
+    S3D_INFO("drive track: %d animated objects (%d sign line verts)", anim_stats.animated,
+             static_cast<int>(animated_lines_[0].vertex_count()));
   } else {
     S3D_WARN("no GAME1/GAME2 shapes found; falling back to placeholder geometry");
     track_mesh_ = build_track_mesh(track_);
@@ -220,6 +241,7 @@ void DriveScene::reset_car() {
 }
 
 void DriveScene::physics_tick(const Controls& controls) {
+  ++game_frame_;  // drives the animated track objects (windmill, sign, ...)
   uint8_t input_flags = physics::kInputNone;
   if (controls.throttle > 0.05f) input_flags |= physics::kInputAccelerate;
   if (controls.throttle < -0.05f) input_flags |= physics::kInputBrake;
@@ -321,6 +343,11 @@ glm::mat4 DriveScene::car_model_matrix(float alpha) const {
 
 void DriveScene::render(Renderer& renderer, int width, int height) {
   renderer.draw_world(track_mesh_, camera_);
+
+  const int phase = world::track_animation_phase(game_frame_);
+  renderer.draw_world(animated_meshes_[phase], camera_);
+  renderer.draw_world_lines(animated_lines_[phase], camera_);
+
   if (!car_mesh_.empty()) {
     renderer.draw_world(car_mesh_, camera_, car_model_matrix(render_alpha()));
   }

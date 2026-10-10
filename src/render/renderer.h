@@ -18,6 +18,11 @@ class Renderer {
   void draw_world(const Mesh& mesh, const Camera& camera,
                   const glm::mat4& model = glm::mat4(1.0f));
 
+  // Draws a mesh built as vertex pairs with GL_LINES (used for the flashing
+  // diner sign). Same lighting/colour shader as draw_world.
+  void draw_world_lines(const Mesh& mesh, const Camera& camera,
+                        const glm::mat4& model = glm::mat4(1.0f));
+
   void set_light_direction(const glm::vec3& dir) { light_dir_ = glm::normalize(dir); }
   void set_fog(const glm::vec3& color, float density) {
     fog_color_ = color;

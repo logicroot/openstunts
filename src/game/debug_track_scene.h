@@ -7,6 +7,7 @@
 #include "game/scene.h"
 #include "render/camera.h"
 #include "render/mesh.h"
+#include "world/track_shapes.h"
 
 namespace s3d {
 
@@ -33,6 +34,8 @@ class DebugTrackScene : public Scene {
   std::string asset_dir_;
   Camera camera_;
   Mesh mesh_;
+  Mesh animated_meshes_[world::kTrackAnimationPhases];
+  Mesh animated_lines_[world::kTrackAnimationPhases];
   std::string screenshot_path_;
   int screenshot_frame_ = 0;
   int frame_index_ = 0;

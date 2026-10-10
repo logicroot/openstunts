@@ -125,6 +125,15 @@ indices. The index count per type is
 `{0,1,2,3,4,5,6,7,8,9,10,2,6,3,0,0}` (types 11/12/13 = 2/6/3). Source:
 `reference/restunts/src/restunts/c/shape3d.c` (`shape3d_init_shape`).
 
+The paint bytes select *materials* (`world/material.h`); a shape with
+`numpaints > 1` can be drawn with any of them. The object's `surface` field
+picks which slot to use: `0`..`2` select a fixed paint (e.g. the `road` shape's
+paved/dirt/ice variants) and `0xFF` marks an **animated** object whose slot
+cycles with `byte_3C0C6[game_frame & 15] = {0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3}`.
+An out-of-range slot clamps to 0. This drives the windmill sails (`wind`:
+material 113 sail vs. 118 transparent mask) and Joe's flashing sign (`rest`).
+Material 118 is a fully transparent mask and is never drawn.
+
 ## Track assembly (`.TRK` → geometry)
 
 The 900-byte item grid and the 900-byte terrain grid address the same physical
