@@ -125,7 +125,6 @@ int16_t update_wheel_suspension(CarState* car, int16_t wheel_index, int16_t cont
 
 void step_car_motion(CarState* car, const CarSpec& spec, int frames_per_sec,
                      const GroundSampler& ground, const TrackCollision* collision) {
-  (void)collision;
   // ---- Working pose --------------------------------------------------------
   int32_t work_x = car->car_position.x;
   int32_t work_y = car->car_position.y;
@@ -166,6 +165,30 @@ void step_car_motion(CarState* car, const CarSpec& spec, int frames_per_sec,
     slide_adjust_rotation = fixed::mat_rot_zxy(0, 0, wrap_negate(slide_rotation), 0);
   }
 
+  // When a loaded track collision model is bound, wheels ride the actual track
+  // planes (ramps, banked roads, elevated terrain) instead of the caller's flat
+  // 2D sampler. `sample_wheel_ground` resolves the element under the wheel,
+  // then returns the wheel's signed distance to that plane; otherwise it falls
+  // back to the 2D sampler.
+  const bool use_track_collision =
+      collision != nullptr && collision->is_loaded() && collision->track() != nullptr;
+  auto sample_wheel_ground = [&](int wheel_x, int wheel_y, int wheel_z,
+                                 int16_t* distance_out) -> int8_t {
+    if (use_track_collision) {
+      const fixed::Vec3 word{static_cast<int16_t>(wheel_x), static_cast<int16_t>(wheel_y),
+                             static_cast<int16_t>(wheel_z)};
+      CollisionSample sample;
+      collision->build_track_object_from_track(*collision->track(), word, word, &sample);
+      *distance_out = static_cast<int16_t>(collision->plane_signed_distance(
+          sample.plane_index, wheel_x, wheel_y, wheel_z, sample.terrain_height,
+          sample.elem_x_center, sample.elem_z_center));
+      return sample.surface_type;
+    }
+    const GroundSample sampled = ground(wheel_x, wheel_z);
+    *distance_out = static_cast<int16_t>(wheel_y - sampled.height);
+    return static_cast<int8_t>(sampled.surface);
+  };
+
   Vec3Long current[4];
   Vec3Long previous[4];
   for (int i = 0; i < kCarWheelCount; ++i) {
@@ -190,16 +213,28 @@ void step_car_motion(CarState* car, const CarSpec& spec, int frames_per_sec,
       if (front_heading_offset != 0 && i < 2) {
         wheel_heading = wrap_sub(car->car_velocity_heading_offset, front_heading_offset);
       }
-      // Reduced model: ground is an infinite flat plane, so transform_wheel_
-      // travel_to_world uses the no-plane branch:
-      //   world_travel = car_to_world * R_y(-heading) * (0, 0, travel).
-      fixed::Mat3 heading_rotation;
-      fixed::mat_rot_y(wrap_negate(wheel_heading), &heading_rotation);
-      const fixed::Vec3 forward{0, 0, travel};
-      fixed::Vec3 plane_direction;
-      fixed::mat_mul_vector(forward, heading_rotation, &plane_direction);
       fixed::Vec3 world_travel;
-      fixed::mat_mul_vector(plane_direction, car_to_world, &world_travel);
+      if (use_track_collision) {
+        // Resolve the plane under the wheel before it moves, then travel along
+        // it (math.c transform_wheel_travel_to_world / plane_rotate_op).
+        const fixed::Vec3 pre_word{static_cast<int16_t>(current[i].x >> kWorldToLongShift),
+                                   static_cast<int16_t>(current[i].y >> kWorldToLongShift),
+                                   static_cast<int16_t>(current[i].z >> kWorldToLongShift)};
+        CollisionSample sample;
+        collision->build_track_object_from_track(*collision->track(), pre_word, pre_word, &sample);
+        collision->transform_wheel_travel_to_world(travel, wheel_heading, car_to_world, work_yaw,
+                                                   work_pitch, work_roll, sample.plane_index,
+                                                   &world_travel);
+      } else {
+        // Flat-ground fallback (no-plane branch of transform_wheel_travel_to_world):
+        //   world_travel = car_to_world * R_y(-heading) * (0, 0, travel).
+        fixed::Mat3 heading_rotation;
+        fixed::mat_rot_y(wrap_negate(wheel_heading), &heading_rotation);
+        const fixed::Vec3 forward{0, 0, travel};
+        fixed::Vec3 plane_direction;
+        fixed::mat_mul_vector(forward, heading_rotation, &plane_direction);
+        fixed::mat_mul_vector(plane_direction, car_to_world, &world_travel);
+      }
       current[i].x = wrap_add32(current[i].x, world_travel.x);
       current[i].y = wrap_add32(current[i].y, world_travel.y);
       current[i].z = wrap_add32(current[i].z, world_travel.z);
@@ -216,23 +251,25 @@ void step_car_motion(CarState* car, const CarSpec& spec, int frames_per_sec,
     const int wheel_x = static_cast<int>(current[i].x >> kWorldToLongShift);
     const int wheel_z = static_cast<int>(current[i].z >> kWorldToLongShift);
     int wheel_y = static_cast<int>(current[i].y >> kWorldToLongShift);
-    const GroundSample ground_sample = ground(wheel_x, wheel_z);
-    int16_t distance = static_cast<int16_t>(wheel_y - ground_sample.height);
+    int16_t distance = 0;
+    int8_t surface = sample_wheel_ground(wheel_x, wheel_y, wheel_z, &distance);
 
     if (distance > 0) {
-      // Airborne: accelerate the wheel downward (one native step).
+      // Airborne: accelerate the wheel downward (one native step), then re-test
+      // the surface below the wheel (reference re-runs build_track_object and
+      // plane_origin_op at the new position, stateply.c loc_16288).
       car->car_wheel_vertical_speed[i] =
           wrap_add(car->car_wheel_vertical_speed[i], kGravityStep[i]);
       current[i].y = wrap_sub32(current[i].y, car->car_wheel_vertical_speed[i]);
       wheel_y = static_cast<int>(current[i].y >> kWorldToLongShift);
-      distance = static_cast<int16_t>(wheel_y - ground_sample.height);
+      surface = sample_wheel_ground(wheel_x, wheel_y, wheel_z, &distance);
       if (distance > kContactDistanceLimit) {
         car->car_surfaceWhl[i] = kWheelContactNone;
       } else {
-        car->car_surfaceWhl[i] = static_cast<int8_t>(ground_sample.surface);
+        car->car_surfaceWhl[i] = surface;
       }
     } else {
-      car->car_surfaceWhl[i] = static_cast<int8_t>(ground_sample.surface);
+      car->car_surfaceWhl[i] = surface;
     }
 
     // Penetration: push the wheel back out of the ground.

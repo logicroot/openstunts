@@ -1,0 +1,329 @@
+// Track collision tests: GAME.PRE plan/wall loading, the two math.c helpers
+// (plane_signed_distance / transform_wheel_travel_to_world), and the
+// build_track_object element dispatch (seg004.asm) on synthetic tracks.
+//
+// Tests that need the shipped plan/wall tables or a real .TRK skip themselves
+// when no Stunts asset directory is found, matching the rest of the suite.
+
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <string>
+
+#include "assets/trk.h"
+#include "core/paths.h"
+#include "physics/fixed_math.h"
+#include "physics/track_collision.h"
+#include "tiny_test.h"
+#include "world/track_objects.h"
+
+using namespace s3d;
+using namespace s3d::physics;
+
+namespace {
+
+bool load_collision(TrackCollision* tc) {
+  const std::string dir = find_asset_dir();
+  if (dir.empty()) return false;
+  return tc->load_from_game_pre(path_join(dir, "GAME.PRE"));
+}
+
+Track empty_track() {
+  Track t;
+  t.sky = 0;
+  return t;
+}
+
+// Stores an element byte at cell (x, y) (index = y*30 + x in this project).
+void set_item(Track* t, int x, int y, uint8_t item) {
+  t->items[static_cast<size_t>(y) * Track::kSize + x] = item;
+}
+
+void set_terrain(Track* t, int x, int y, uint8_t terrain) {
+  t->terrain[static_cast<size_t>(y) * Track::kSize + x] = terrain;
+}
+
+fixed::Vec3 word_pos(int x, int y, int z) {
+  fixed::Vec3 v;
+  v.x = static_cast<int16_t>(x);
+  v.y = static_cast<int16_t>(y);
+  v.z = static_cast<int16_t>(z);
+  return v;
+}
+
+}  // namespace
+
+// ---------------------------------------------------------------------------
+// Loader
+// ---------------------------------------------------------------------------
+TEST(track_collision_loads_plan_and_wall_tables) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  EXPECT_TRUE(tc.is_loaded());
+  EXPECT_EQ(tc.plane_count(), 536u);
+  EXPECT_EQ(tc.wall_count(), 191u);
+
+  const Plane* p = tc.planes();
+  // Plane 0: flat ground at y = 0 with an upward normal of length 0x2000.
+  EXPECT_EQ(p[0].plane_origin.y, 0);
+  EXPECT_EQ(p[0].plane_normal.x, 0);
+  EXPECT_EQ(p[0].plane_normal.y, 8192);
+  EXPECT_EQ(p[0].plane_normal.z, 0);
+  // Plane 4 (highway) is the flat plane raised to y = 24.
+  EXPECT_EQ(p[4].plane_origin.y, 24);
+  // Plane 8 (elevated/solid road) sits at y = 450.
+  EXPECT_EQ(p[8].plane_origin.y, 450);
+}
+
+// ---------------------------------------------------------------------------
+// plane_signed_distance (math.c:826)
+// ---------------------------------------------------------------------------
+TEST(track_collision_plane_signed_distance_flat_planes) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  // Plane < 4: distance is y minus the accumulated terrain height.
+  EXPECT_EQ(tc.plane_signed_distance(0, 100, 50, 200, 0, 0, 0), 50);
+  EXPECT_EQ(tc.plane_signed_distance(0, 100, 50, 200, 7, 123, 456), 43);
+  // No plane (-1) falls back to the same flat rule.
+  EXPECT_EQ(tc.plane_signed_distance(-1, 100, 50, 200, 7, 0, 0), 43);
+  // Plane 4 (highway, origin y = 24) subtracts the 24 elevation.
+  EXPECT_EQ(tc.plane_signed_distance(4, 100, 100, 200, 0, 0, 0), 76);
+  // Plane 8 (elevated, origin y = 450).
+  EXPECT_EQ(tc.plane_signed_distance(8, 100, 500, 200, 0, 0, 0), 50);
+}
+
+TEST(track_collision_plane_signed_distance_tilted_plane) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  // Plane 12 has origin (120, 0, -512) and normal (0, 7499, -3295). Evaluating
+  // at the origin+element-centre leaves only the y term: 7499 * 8192 / 8192.
+  EXPECT_EQ(tc.plane_signed_distance(12, 120, 8192, -512, 0, 0, 0), 7499);
+  // For plane_index >= 4 the element centre offsets the origin; for < 4 it is
+  // ignored entirely.
+  EXPECT_EQ(tc.plane_signed_distance(0, 100, 50, 200, 0, 123, 456),
+            tc.plane_signed_distance(0, 100, 50, 200, 0, 0, 0));
+  EXPECT_TRUE(tc.plane_signed_distance(12, 120, 8192, -512, 0, 0, 100) !=
+              tc.plane_signed_distance(12, 120, 8192, -512, 0, 0, 0));
+}
+
+// ---------------------------------------------------------------------------
+// transform_wheel_travel_to_world (math.c:864 plane_rotate_op)
+// ---------------------------------------------------------------------------
+TEST(track_collision_transform_no_plane_matches_car_matrix) {
+  // The no-plane branch never touches the plane tables, so no assets needed.
+  TrackCollision tc;
+  const fixed::Mat3 identity;
+  fixed::Vec3 out;
+
+  tc.transform_wheel_travel_to_world(100, 0, identity, 0, 0, 0, -1, &out);
+  EXPECT_EQ(out.x, 0);
+  EXPECT_EQ(out.y, 0);
+  EXPECT_EQ(out.z, 100);  // car_to_world * (0, 0, travel)
+
+  // A quarter-turn wheel heading rotates the travel into -X (mat_rot_y(-90)).
+  tc.transform_wheel_travel_to_world(100, 0x100, identity, 0, 0, 0, -1, &out);
+  EXPECT_EQ(out.y, 0);
+  EXPECT_TRUE(std::abs(out.x) >= 99 && std::abs(out.x) <= 100);
+  EXPECT_TRUE(std::abs(out.z) <= 1);
+}
+
+TEST(track_collision_transform_flat_plane_keeps_travel) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  const fixed::Mat3 identity;
+  fixed::Vec3 out;
+  // Plane 0 is the identity orientation and matches pitch/roll == 0, so with a
+  // zero wheel heading the travel passes through unchanged.
+  tc.transform_wheel_travel_to_world(100, 0, identity, 0, 0, 0, 0, &out);
+  EXPECT_EQ(out.x, 0);
+  EXPECT_EQ(out.y, 0);
+  EXPECT_EQ(out.z, 100);
+}
+
+// ---------------------------------------------------------------------------
+// build_track_object (seg004.asm)
+// ---------------------------------------------------------------------------
+TEST(track_collision_build_object_needs_bound_track) {
+  // Without a bound track the result is the flat grass default.
+  TrackCollision tc;
+  CollisionSample s;
+  tc.build_track_object(word_pos(3000, 0, 4000), word_pos(3000, 0, 4000), &s);
+  EXPECT_EQ(s.plane_index, 0);
+  EXPECT_EQ(s.surface_type, static_cast<int8_t>(CarSurfaceType::Grass));
+  EXPECT_EQ(s.wall_index, -1);
+
+  // The explicit overload is also flat when the plan/wall tables are absent.
+  Track t = empty_track();
+  tc.build_track_object_from_track(t, word_pos(3000, 0, 4000), word_pos(3000, 0, 4000), &s);
+  EXPECT_EQ(s.plane_index, 0);
+  EXPECT_EQ(s.surface_type, static_cast<int8_t>(CarSurfaceType::Grass));
+}
+
+TEST(track_collision_build_object_flat_grass) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  Track t = empty_track();
+  tc.set_track(&t);
+
+  // Cell (3, 4) centre: no element, no special terrain -> flat grass.
+  const int wx = 3 * 1024 + 512;
+  const int wz = 4 * 1024 + 512;
+  CollisionSample s;
+  tc.build_track_object(word_pos(wx, 0, wz), word_pos(wx, 0, wz), &s);
+  EXPECT_EQ(s.plane_index, 0);
+  EXPECT_EQ(s.surface_type, static_cast<int8_t>(CarSurfaceType::Grass));
+  EXPECT_EQ(s.wall_index, -1);
+  // Grass adds the ((worldx ^ worldz) >> 8) & 1 checkerboard, which is 0 at a
+  // cell centre (both coordinates are odd multiples of 512).
+  EXPECT_EQ(s.terrain_height, ((wx ^ wz) >> 8) & 1);
+}
+
+TEST(track_collision_build_object_road_is_paved) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  Track t = empty_track();
+  set_item(&t, 3, 4, 4);  // item 4: straight road, physical model 1
+  tc.set_track(&t);
+
+  const int wx = 3 * 1024 + 512;
+  const int wz = 4 * 1024 + 512;
+  CollisionSample s;
+  tc.build_track_object(word_pos(wx, 0, wz), word_pos(wx, 0, wz), &s);
+  EXPECT_EQ(s.physical_model, 1);
+  EXPECT_EQ(s.plane_index, 0);
+  // Pavement: surface type 1 and the +2 non-grass height offset.
+  EXPECT_EQ(s.surface_type, static_cast<int8_t>(CarSurfaceType::Paved));
+  EXPECT_EQ(s.terrain_height, 2);
+}
+
+TEST(track_collision_build_object_ramp_selects_slope_plane) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  Track t = empty_track();
+  set_item(&t, 5, 6, 58);  // item 58: ramp, rot 0, physical model 16
+  tc.set_track(&t);
+
+  const int wx = 5 * 1024 + 512;
+  const int wz = 6 * 1024 + 512;
+  CollisionSample s;
+  tc.build_track_object(word_pos(wx, 0, wz), word_pos(wx, 0, wz), &s);
+  EXPECT_EQ(s.physical_model, 16);
+  // Group 3 (ramp) with no orientation offset -> plane 12.
+  EXPECT_EQ(s.plane_index, 12);
+  EXPECT_EQ(s.surface_type, static_cast<int8_t>(CarSurfaceType::Paved));
+}
+
+TEST(track_collision_build_object_hill_terrain_slope) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  Track t = empty_track();
+  set_terrain(&t, 4, 8, 7);  // terrain 7, variant 0 -> uphill slope plane
+  tc.set_track(&t);
+
+  const int wx = 4 * 1024 + 512;
+  const int wz = 8 * 1024 + 512;
+  CollisionSample s;
+  tc.build_track_object(word_pos(wx, 0, wz), word_pos(wx, 0, wz), &s);
+  // code_bto_blank hill parsing: terrain 7 with planindex 0 -> planindex 3,
+  // orient 0 -> plane 12.
+  EXPECT_EQ(s.plane_index, 12);
+  EXPECT_EQ(s.surface_type, static_cast<int8_t>(CarSurfaceType::Grass));
+}
+
+TEST(track_collision_build_object_elevated_terrain_adds_height) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  Track t = empty_track();
+  set_terrain(&t, 2, 2, 6);  // elevated plateau -> +450
+  tc.set_track(&t);
+
+  const int wx = 2 * 1024 + 512;
+  const int wz = 2 * 1024 + 512;
+  CollisionSample s;
+  tc.build_track_object(word_pos(wx, 350, wz), word_pos(wx, 350, wz), &s);
+  EXPECT_EQ(s.plane_index, 0);
+  EXPECT_TRUE(s.terrain_height >= 450);
+}
+
+TEST(track_collision_build_object_bound_track_matches_explicit_track) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  Track t = empty_track();
+  set_item(&t, 3, 4, 4);
+  tc.set_track(&t);
+
+  const int wx = 3 * 1024 + 512;
+  const int wz = 4 * 1024 + 512;
+  CollisionSample a, b;
+  tc.build_track_object(word_pos(wx, 0, wz), word_pos(wx, 0, wz), &a);
+  tc.build_track_object_from_track(t, word_pos(wx, 0, wz), word_pos(wx, 0, wz), &b);
+  EXPECT_EQ(a.plane_index, b.plane_index);
+  EXPECT_EQ(a.surface_type, b.surface_type);
+  EXPECT_EQ(a.terrain_height, b.terrain_height);
+}
+
+// ---------------------------------------------------------------------------
+// Real track sanity check
+// ---------------------------------------------------------------------------
+TEST(track_collision_build_object_real_track_road_cell) {
+  const std::string dir = find_asset_dir();
+  if (dir.empty()) {
+    std::printf("  (skipped: no Stunts asset dir)\n");
+    return;
+  }
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no GAME.PRE)\n");
+    return;
+  }
+  Track t = Track::load(path_join(dir, "DEFAULT.TRK"));
+  tc.set_track(&t);
+
+  // Scan for a straight-road element (item 4/5) and confirm it resolves to the
+  // flat plane and a paved surface.
+  bool found = false;
+  for (int y = 0; y < Track::kSize && !found; ++y) {
+    for (int x = 0; x < Track::kSize && !found; ++x) {
+      const uint8_t item = t.item(x, y);
+      if (item != 4 && item != 5) continue;
+      const int wx = x * 1024 + 512;
+      const int wz = y * 1024 + 512;
+      CollisionSample s;
+      tc.build_track_object(word_pos(wx, 0, wz), word_pos(wx, 0, wz), &s);
+      EXPECT_EQ(s.plane_index, 0);
+      EXPECT_EQ(s.surface_type, static_cast<int8_t>(CarSurfaceType::Paved));
+      found = true;
+    }
+  }
+  EXPECT_TRUE(found);
+}

@@ -8,104 +8,97 @@
 #include "assets/compression.h"
 #include "assets/res_file.h"
 #include "physics/wrap_math.h"
-#include "world/track_elevation.h"
+#include "world/track_objects.h"
 
 namespace s3d::physics {
 
 namespace {
-inline constexpr int kTrackSize = 30;
+
+inline constexpr int kTrackSize = s3d::Track::kSize;
 inline constexpr int kTileSize = 1024;
-inline constexpr int kTrackGridLastIndex = kTrackSize - 1;
-inline constexpr int16_t kNoPlaneIndex = -1;  // we use -1 for none; reference used 0 differently in some contexts
-inline constexpr int16_t kTerrainFlatPlaneIndex = 3;
-inline constexpr int16_t kTerrainSlopeDownPlaneIndex = 4;
-inline constexpr int16_t kTerrainSlopeUpPlaneIndex = 5;
+inline constexpr int kHalfTile = 512;
 
-inline constexpr int16_t kAngleMask = 0x3FF;
-inline constexpr int16_t kAngleQuarterTurn = 256;
-inline constexpr int16_t kAngleHalfTurn = 512;
-inline constexpr int16_t kAngleThreeQuarterTurn = 768;
+inline constexpr int kOrient0 = 0;
+inline constexpr int kOrient90 = 0x100;
+inline constexpr int kOrient180 = 0x200;
+inline constexpr int kOrient270 = 0x300;
 
-inline constexpr uint8_t kTerrainRaisedTile = 6;
-inline constexpr int kRaisedHeight = 450;
-inline constexpr int kGrassHeightShift = 8;
-inline constexpr int kGrassHeightMask = 1;
+// Terrain bytes.
+inline constexpr uint8_t kTerrainElevated = 6;
+inline constexpr int kElevatedHeight = 450;     // hillHeightConsts[1]
+inline constexpr int kGrassHeightOffset = 2;    // non-grass surfaces sit +2
 inline constexpr int kNonGrassHeightOffset = 2;
 
-inline constexpr int kTerrainSlope5Angle = 128;  // degrees? reference uses 128 in sintab units context; but values come from reference
-inline constexpr int kTerrainSlope2Angle = 128;
-inline constexpr int kTerrainSlope3Angle = -640;
-inline constexpr int kTerrainSlope4Angle = -384;
-
-inline constexpr uint8_t kTileContinuationSoutheast = 0xFD;
-inline constexpr uint8_t kTileContinuationSouth = 0xFE;
-inline constexpr uint8_t kTileContinuationEast = 0xFF;
-inline constexpr uint8_t kTileEmpty = 0x00;
-
-// PHYSICAL_MODEL constants from reference
+// Physical model ids (trkObjectList[].ss_physicalModel).
 enum PhysModel {
-  PHYS_MODEL_NONE = -1,
-  PHYS_MODEL_START_FINISH = 0,
-  PHYS_MODEL_ROAD = 1,
-  PHYS_MODEL_SHARP_CORNER = 2,
-  PHYS_MODEL_LARGE_CORNER = 3,
-  PHYS_MODEL_CHICANE_RIGHT_LEFT = 4,
-  PHYS_MODEL_CHICANE_LEFT_RIGHT = 5,
-  PHYS_MODEL_SHARP_SPLIT_A = 6,
-  PHYS_MODEL_SHARP_SPLIT_B = 7,
-  PHYS_MODEL_LARGE_SPLIT_A = 8,
-  PHYS_MODEL_LARGE_SPLIT_B = 9,
-  PHYS_MODEL_HIGHWAY_ENTRANCE = 10,
-  PHYS_MODEL_HIGHWAY = 11,
-  PHYS_MODEL_CROSSROAD = 12,
-  PHYS_MODEL_RAMP = 16,
-  PHYS_MODEL_SOLID_RAMP = 17,
-  PHYS_MODEL_ELEVATED_ROAD = 18,
-  PHYS_MODEL_ELEVATED_SPAN = 19,
-  PHYS_MODEL_SOLID_ROAD = 20,
-  PHYS_MODEL_ELEVATED_CORNER = 21,
-  PHYS_MODEL_OVERPASS = 22,
-  PHYS_MODEL_BANKED_ENTRANCE_B = 23,
-  PHYS_MODEL_BANKED_ENTRANCE_A = 24,
-  PHYS_MODEL_BANKED_ROAD = 25,
-  PHYS_MODEL_BANKED_CORNER = 26,
-  PHYS_MODEL_LOOP = 27,
-  PHYS_MODEL_TUNNEL = 28,
-  PHYS_MODEL_PIPE_ENTRANCE = 29,
-  PHYS_MODEL_PIPE = 30,
-  PHYS_MODEL_HALF_PIPE = 31,
-  PHYS_MODEL_CORKSCREW_UP_DOWN_A = 32,
-  PHYS_MODEL_CORKSCREW_UP_DOWN_B = 33,
-  PHYS_MODEL_SLALOM = 34,
-  PHYS_MODEL_CORKSCREW_LEFT_RIGHT = 35,
-  PHYS_MODEL_BARN = 65,
-  PHYS_MODEL_GAS_STATION = 66,
-  PHYS_MODEL_JOES = 67,
-  PHYS_MODEL_OFFICE = 68,
-  PHYS_MODEL_WINDMILL = 69,
-  PHYS_MODEL_SHIP = 70,
+  PHYS_SFLINE = 0,
+  PHYS_ROAD = 1,
+  PHYS_SCORNER = 2,
+  PHYS_LCORNER = 3,
+  PHYS_CHICANE_RL = 4,
+  PHYS_CHICANE_LR = 5,
+  PHYS_SSPLIT_A = 6,
+  PHYS_SSPLIT_B = 7,
+  PHYS_LSPLIT_A = 8,
+  PHYS_LSPLIT_B = 9,
+  PHYS_HIGH_ENTRANCE = 10,
+  PHYS_HIGHWAY = 11,
+  PHYS_CROSSROAD = 12,
+  PHYS_RAMP = 16,
+  PHYS_SOLID_RAMP = 17,
+  PHYS_ELEV_ROAD = 18,
+  PHYS_ELEV_SPAN = 19,
+  PHYS_SOLID_ROAD = 20,
+  PHYS_ELEV_CORNER = 21,
+  PHYS_OVERPASS = 22,
+  PHYS_BANK_ENTRANCE_B = 23,
+  PHYS_BANK_ENTRANCE_A = 24,
+  PHYS_BANK_ROAD = 25,
+  PHYS_BANK_CORNER = 26,
 };
 
-inline int16_t sar16(int16_t x, unsigned shift) {
-  if (shift >= 16) shift = 16;
-  int16_t v = x >> shift;
-  if ((x & 0x8000) && shift) {
-    v |= (int16_t)(0xFFFF << (16 - shift)) & 0xFFFF;
+int16_t s16_wrap(int v) { return static_cast<int16_t>(static_cast<uint16_t>(v & 0xFFFF)); }
+
+int polar_radius(int16_t z, int16_t y) {
+  return fixed::polar_radius2d(z, y);
+}
+int polar_angle_2d(int16_t z, int16_t y) {
+  return fixed::polar_angle(z, y);
+}
+
+// Hill-road substitution (matches track_shapes.cpp): maps a road/deck item on
+// hill terrain (7..10) to the matching hill variant item.
+uint8_t subst_hillroad_track(int terrain, uint8_t item) {
+  static const uint8_t kPieces[4][6] = {
+      {4, 14, 24, 39, 59, 98},
+      {5, 15, 25, 36, 56, 95},
+      {4, 14, 24, 38, 58, 97},
+      {5, 15, 25, 37, 57, 96}};
+  static const uint8_t kShapes[4][4] = {
+      {182, 186, 190, 194},
+      {183, 187, 191, 195},
+      {184, 188, 192, 196},
+      {185, 189, 193, 197}};
+  if (terrain < 7 || terrain > 10) return item;
+  const int row = terrain - 7;
+  for (int p = 0; p < 6; ++p) {
+    if (kPieces[row][p] == item) return kShapes[row][p < 3 ? p : 3];
   }
-  return v;
+  return item;
 }
 
-inline int16_t word_abs(int16_t v) { return v < 0 ? -v : v; }
-inline int16_t clamp_word(int16_t v) { return v & kAngleMask; }  // not exactly; angles use &0x3FF
+// highEntrance longitudinal band boundaries (dseg.asm). The reference indexes
+// `highEntrZBounds0[i]` and `highEntrZBounds1[i]`, which are the same array
+// offset by one element, so ZBounds0[i] == B[i] and ZBounds1[i] == B[i+1].
+constexpr int16_t kHighEntrZBounds[7] = {
+    static_cast<int16_t>(65024), static_cast<int16_t>(65202),
+    static_cast<int16_t>(65368), 0, 168, 334, 1000};
+constexpr int16_t kHighEntrXInnBounds[7] = {0, 0, 0, 0, 0, 120, 120};
+constexpr int16_t kHighEntrXOutBounds[7] = {120, 168, 216, 264, 312, 360, 360};
 
-inline int world_to_cell(int w) {
-  int c = sar16((int16_t)(w >> 10), 0);  // rough
-  // easier: use float logic via integer: c = w / 1024
-  c = w / kTileSize;
-  if (c < 0) c = 0;
-  if (c >= kTrackSize) c = kTrackSize - 1;
-  return c;
-}
+// banked-entrance triangular z adjustments (dseg.asm bkRdEntr_triang_zAdjust).
+constexpr int16_t kBkRdEntrZAdjust[4] = {
+    static_cast<int16_t>(65285), static_cast<int16_t>(65452), 84, 251};
 
 }  // namespace
 
@@ -121,18 +114,22 @@ bool TrackCollision::load_from_game_pre(const std::string& game_pre_path) {
   if (!rf.load(raw_unpacked.data(), raw_unpacked.size())) {
     return false;
   }
-  const auto* plan_res = rf.find("plan");
-  const auto* wall_res = rf.find("wall");
-  if (!plan_res || !wall_res) {
+  // NOTE: chunk offsets are relative to `rf.data_offset()`, so read() must be
+  // used (or data_offset_ added). Reading `raw_unpacked.data() + offset`
+  // directly starts 6 + chunks*8 bytes too early.
+  const std::vector<uint8_t> plan = rf.read("plan");
+  const std::vector<uint8_t> wall = rf.read("wall");
+  if (plan.empty() || wall.empty()) {
     return false;
   }
 
-  const uint8_t* p = raw_unpacked.data() + plan_res->offset;
-  // decode 536 planes * 34 bytes
-  planes_.resize(536);
-  size_t off = 0;
-  for (size_t i = 0; i < 536 && off + 34 <= plan_res->size; ++i) {
-    auto r16 = [&](size_t j) -> int16_t { return (int16_t)(p[off + j] | (p[off + j + 1] << 8)); };
+  // 536 planes * 34 bytes.
+  planes_.resize(plan.size() / 34);
+  for (size_t i = 0; i < planes_.size(); ++i) {
+    const size_t off = i * 34;
+    auto r16 = [&](size_t j) -> int16_t {
+      return static_cast<int16_t>(plan[off + j] | (plan[off + j + 1] << 8));
+    };
     planes_[i].plane_yz = r16(0);
     planes_[i].plane_xy = r16(2);
     planes_[i].plane_origin.x = r16(4);
@@ -141,109 +138,654 @@ bool TrackCollision::load_from_game_pre(const std::string& game_pre_path) {
     planes_[i].plane_normal.x = r16(10);
     planes_[i].plane_normal.y = r16(12);
     planes_[i].plane_normal.z = r16(14);
-    // rotation matrix 9 elements
     for (int j = 0; j < 9; ++j) {
       planes_[i].plane_rotation.m[j] = r16(16 + j * 2);
     }
-    off += 34;
   }
 
-  const uint8_t* w = raw_unpacked.data() + wall_res->offset;
-  walls_.resize(191);
-  off = 0;
-  for (size_t i = 0; i < 191 && off + 6 <= wall_res->size; ++i) {
-    auto r16w = [&](size_t j) -> int16_t { return (int16_t)(w[off + j] | (w[off + j + 1] << 8)); };
+  // 191 walls * 6 bytes.
+  walls_.resize(wall.size() / 6);
+  for (size_t i = 0; i < walls_.size(); ++i) {
+    const size_t off = i * 6;
+    auto r16w = [&](size_t j) -> int16_t {
+      return static_cast<int16_t>(wall[off + j] | (wall[off + j + 1] << 8));
+    };
     walls_[i].orientation = r16w(0);
     walls_[i].x = r16w(2);
     walls_[i].z = r16w(4);
-    off += 6;
   }
 
   loaded_ = true;
   return true;
 }
 
-int16_t TrackCollision::plane_signed_distance(int16_t plane_index, int16_t x, int16_t y, int16_t z) const {
-  if (plane_index < 0 || static_cast<size_t>(plane_index) >= planes_.size()) return y;  // fallback
-  const Plane& plane = planes_[plane_index];
-  fixed::Vec3 world_origin;
-  // terrainHeight logic is outside; caller adjusts? reference adds terrainHeight to plane_origin.y in some contexts
-  world_origin = plane.plane_origin;
-  fixed::Vec3 rel;
-  rel.y = y - world_origin.y;
-  if (plane_index < 4) {  // matches reference comment
-    return rel.y;
+int TrackCollision::plane_signed_distance(int plane_index, int x, int y, int z, int terrain_height,
+                                          int elem_x_center, int elem_z_center) const {
+  if (plane_index < 0 || static_cast<size_t>(plane_index) >= planes_.size()) {
+    // No plane: the reference treats the surface as the flat ground plane at
+    // the accumulated terrain height.
+    return y - terrain_height;
   }
-  rel.x = x - world_origin.x;
-  rel.z = z - world_origin.z;
-  // vec_normalInnerProduct: rel · plane_normal / scale
-  int32_t prod = (int32_t)rel.x * plane.plane_normal.x + (int32_t)rel.y * plane.plane_normal.y +
-                 (int32_t)rel.z * plane.plane_normal.z;
-  int32_t q = prod / 8192;  // NORMAL_INNER_PRODUCT_SCALE
-  return (int16_t)q;
+  const Plane& plane = planes_[plane_index];
+  const int by = plane.plane_origin.y + terrain_height;
+  const int ay = y - by;
+  if (plane_index < 4) {
+    return ay;
+  }
+  const int bx = plane.plane_origin.x + elem_x_center;
+  const int bz = plane.plane_origin.z + elem_z_center;
+  const int ax = x - bx;
+  const int az = z - bz;
+  return fixed::vec_normal_inner_product(ax, ay, az, plane.plane_normal);
 }
 
-void TrackCollision::transform_wheel_travel_to_world(int16_t travel, int16_t wheel_heading_offset,
+void TrackCollision::transform_wheel_travel_to_world(int16_t travel, int16_t wheel_heading,
                                                      const fixed::Mat3& car_to_world, int16_t car_yaw,
                                                      int16_t car_pitch, int16_t car_roll,
+                                                     int plane_index,
                                                      fixed::Vec3* wheel_world_travel) const {
-  // For now, implement the no-plane/fallback branch similar to reference
-  // This is a simplified version for the reduced model integration
-  if (travel == 0) {
-    *wheel_world_travel = fixed::Vec3{0, 0, 0};
+  if (wheel_world_travel == nullptr) return;
+  const fixed::Vec3 travel_vec{0, 0, travel};
+
+  if (plane_index < 0 || static_cast<size_t>(plane_index) >= planes_.size()) {
+    // No-plane branch (math.c loc_198C2): car_to_world * R_y(-heading) * travel.
+    if (wheel_heading == 0) {
+      fixed::mat_mul_vector(travel_vec, car_to_world, wheel_world_travel);
+      return;
+    }
+    fixed::Mat3 heading_rot;
+    fixed::mat_rot_y(wrap_negate(wheel_heading), &heading_rot);
+    fixed::Vec3 rotated;
+    fixed::mat_mul_vector(travel_vec, heading_rot, &rotated);
+    fixed::mat_mul_vector(rotated, car_to_world, wheel_world_travel);
     return;
   }
-  fixed::Mat3 heading_rotation;
-  fixed::mat_rot_y(wrap_negate(wheel_heading_offset), &heading_rotation);
-  const fixed::Vec3 forward{0, 0, travel};
-  fixed::Vec3 plane_direction;
-  fixed::mat_mul_vector(forward, heading_rotation, &plane_direction);
-  fixed::mat_mul_vector(plane_direction, car_to_world, wheel_world_travel);
+
+  const Plane& plane = planes_[plane_index];
+  int si;
+  if (plane.plane_xy == car_pitch && plane.plane_yz == car_roll) {
+    si = car_yaw;
+  } else {
+    // var_32 = R_plane^-1 * (car_to_world * travel).
+    fixed::Vec3 in_car;
+    fixed::mat_mul_vector(travel_vec, car_to_world, &in_car);
+    fixed::Mat3 plane_inv;
+    fixed::mat_invert(plane.plane_rotation, &plane_inv);
+    fixed::Vec3 in_plane;
+    fixed::mat_mul_vector(in_car, plane_inv, &in_plane);
+    si = polar_angle_2d(wrap_negate(in_plane.x), in_plane.z);
+  }
+  si = wrap_add(static_cast<int16_t>(si), wheel_heading);
+
+  fixed::Vec3 plane_dir;
+  if (si == 0) {
+    plane_dir = travel_vec;
+  } else {
+    fixed::Mat3 rot;
+    fixed::mat_rot_y(wrap_negate(si), &rot);
+    fixed::mat_mul_vector(travel_vec, rot, &plane_dir);
+  }
+  fixed::mat_mul_vector(plane_dir, plane.plane_rotation, wheel_world_travel);
 }
 
-void TrackCollision::build_track_object_from_track(const s3d::Track& track, const fixed::Vec3& world_pos,
-                                                   const fixed::Vec3& next_world_pos, CollisionSample* out) {
-  (void)next_world_pos;
-  if (!out) return;
-  *out = CollisionSample{};
-  if (!loaded_) return;
+void TrackCollision::build_track_object_from_track(const s3d::Track& track,
+                                                   const fixed::Vec3& world_pos,
+                                                   const fixed::Vec3& next_world_pos,
+                                                   CollisionSample* out) const {
+  if (out == nullptr) return;
+  CollisionSample sample;
+  sample.plane_index = 0;
+  sample.wall_index = -1;
+  sample.surface_type = static_cast<int8_t>(CarSurfaceType::Grass);
+  sample.wall_height = -4;
+  sample.wall_lower_bound = -1000;
 
-  int x = world_pos.x / kTileSize;
-  int z = world_pos.z / kTileSize;
-  if (x < 0) x = 0;
-  if (z < 0) z = 0;
-  if (x >= kTrackSize) x = kTrackSize - 1;
-  if (z >= kTrackSize) z = kTrackSize - 1;
-
-  uint8_t terrain_tile = track.terrain_at(x, z);
-  int16_t terrain_height = 0;
-  if (terrain_tile == 6) terrain_height = 450;
-  out->plane_index = -1;
-  // simple hill slope hint
-  if (terrain_tile >= 7 && terrain_tile <= 18) {
-    out->plane_index = 3; // flat base plane; more specific later
-  }
-  out->terrain_height = terrain_height;
-  out->elem_x_center = x * kTileSize + kTileSize / 2;
-  out->elem_z_center = z * kTileSize + kTileSize / 2;
-
-  uint8_t item = track.item(x, z);
-  int ox = x, oy = z;
-  if (item == 0xFD) { ox = x - 1; oy = z + 1; }
-  else if (item == 0xFE) { oy = z + 1; }
-  else if (item == 0xFF) { ox = x - 1; }
-  if (ox >= 0 && oy >= 0 && ox < kTrackSize && oy < kTrackSize) {
-    item = track.item(ox, oy);
+  if (!loaded_) {
+    *out = sample;
+    return;
   }
 
-  world::GroundSample gs = world::ground_sample_at(track, static_cast<float>(world_pos.x), static_cast<float>(world_pos.z));
-  out->surface_type = static_cast<int8_t>(gs.surface);
+  const int16_t world_x = world_pos.x;
+  const int16_t world_z = world_pos.z;
 
-  out->plane_index = -1;
-  out->wall_index = -1;
-  out->wall_collision_enabled = 1;
-  out->wall_height = 384;
-  out->wall_lower_bound = -1000;
+  const int col = static_cast<int>(world_x) >> 10;
+  const int row = static_cast<int>(world_z) >> 10;
+  if (col < 0 || col >= kTrackSize || row < 0 || row >= kTrackSize) {
+    *out = sample;
+    return;
+  }
+
+  int terrain_height = 0;
+  const uint8_t terrain = track.terrain_at(col, row);
+  if (terrain == kTerrainElevated) terrain_height = kElevatedHeight;
+
+  // Resolve the element covering the cell (continuation markers point back at
+  // their multi-tile owner).
+  world::PlacedTrackObject placed;
+  uint8_t item = 0;
+  int owner_col = col;
+  int owner_row = row;
+  if (world::track_object_at(track, col, row, &placed)) {
+    item = static_cast<uint8_t>(placed.item);
+    owner_col = placed.owner_x;
+    owner_row = placed.owner_y;
+  }
+
+  int8_t surface_type = static_cast<int8_t>(CarSurfaceType::Grass);
+  if (item == 0) {
+    // No element. Water terrain reads as water; otherwise grass.
+    if (terrain >= 1 && terrain <= 5) surface_type = static_cast<int8_t>(CarSurfaceType::Water);
+  } else {
+    item = subst_hillroad_track(terrain, item);
+  }
+
+  const world::TrackObjectDef& def = world::track_object(item == 0 ? 0 : item);
+  int16_t elem_x_center;
+  int16_t elem_z_center;
+  if (item == 0) {
+    elem_x_center = static_cast<int16_t>(col * kTileSize + kHalfTile);
+    elem_z_center = static_cast<int16_t>(row * kTileSize + kHalfTile);
+  } else {
+    elem_x_center = (def.multi_tile & 2) ? static_cast<int16_t>((owner_col + 1) * kTileSize)
+                                         : static_cast<int16_t>(owner_col * kTileSize + kHalfTile);
+    elem_z_center = (def.multi_tile & 1) ? static_cast<int16_t>(owner_row * kTileSize)
+                                         : static_cast<int16_t>(owner_row * kTileSize + kHalfTile);
+  }
+
+  const int16_t raw_vx = wrap_sub(world_x, elem_x_center);
+  const int16_t raw_vz = wrap_sub(world_z, elem_z_center);
+  const int16_t raw_nvx = wrap_sub(next_world_pos.x, elem_x_center);
+  const int16_t raw_nvz = wrap_sub(next_world_pos.z, elem_z_center);
+
+  int16_t vx = raw_vx;
+  int16_t vz = raw_vz;
+  int16_t nvx = raw_nvx;
+  int16_t nvz = raw_nvz;
+
+  int16_t elem_orient = kOrient0;
+  int16_t wall_orient_mod = 0;
+  int planindex = 0;
+  int wallindex = -1;
+  int wall_height = -4;
+  int wall_lower_bound = -1000;
+  const int16_t phys = item == 0 ? -1 : def.phys;
+
+  if (item != 0) {
+    elem_orient = def.rot_y;
+
+    // Rotate the element-relative coordinates into the canonical orientation.
+    auto rotate = [&](int16_t* px, int16_t* pz) {
+      const int16_t ox = *px;
+      const int16_t oz = *pz;
+      switch (elem_orient) {
+        case kOrient90:  // loc_1E562
+          *px = wrap_negate(oz);
+          *pz = ox;
+          break;
+        case kOrient180:  // loc_1E540
+          *px = wrap_negate(ox);
+          *pz = wrap_negate(oz);
+          break;
+        case kOrient270:  // loc_1E516
+          *px = oz;
+          *pz = wrap_negate(ox);
+          break;
+        default:
+          break;
+      }
+    };
+    rotate(&vx, &vz);
+    rotate(&nvx, &nvz);
+  }
+
+  const int16_t abs_x = vx < 0 ? wrap_negate(vx) : vx;
+  const int16_t abs_z = vz < 0 ? wrap_negate(vz) : vz;
+
+  // Dispatch on the physical model. Each branch fills planindex / surface /
+  // walls; unclear or unsupported models fall through to code_bto_blank.
+  auto set_pavement = [&]() { surface_type = static_cast<int8_t>(def.surface) + 1; };
+
+  if (item != 0 && phys >= 0 && phys <= 74) {
+    // The sharp/large corner radius tests share the same "pavement if the turn
+    // radius falls inside the road band" shape.
+    auto sharp_corner = [&](int16_t cx, int16_t cz) {
+      const int turn = polar_radius(cx, cz);
+      if (turn > 0x188 && turn < 0x278) set_pavement();
+    };
+    auto large_corner = [&](int16_t cx, int16_t cz) {
+      const int turn = polar_radius(cx, cz);
+      if (turn > 0x588 && turn < 0x678) set_pavement();
+    };
+
+    switch (phys) {
+      case PHYS_SFLINE:
+      case PHYS_ROAD: {
+        if (abs_x < 0x78) set_pavement();
+        break;
+      }
+      case PHYS_CROSSROAD: {
+        if (abs_x < 0x78 || abs_z < 0x78) set_pavement();
+        break;
+      }
+      case PHYS_CHICANE_LR: {
+        vx = wrap_negate(vx);
+        nvx = wrap_negate(nvx);
+        [[fallthrough]];
+      }
+      case PHYS_CHICANE_RL: {
+        set_pavement();
+        if (vx > 0) {
+          vz = wrap_negate(vz);
+          vx = wrap_negate(vx);
+        }
+        [[fallthrough]];
+      }
+      case PHYS_LCORNER: {
+        large_corner(wrap_add(vz, 0x400), wrap_add(vx, 0x400));
+        break;
+      }
+      case PHYS_SCORNER: {
+        sharp_corner(wrap_add(vz, 0x200), wrap_add(vx, 0x200));
+        break;
+      }
+      case PHYS_SSPLIT_A: {
+        if (abs_x < 0x78) {
+          set_pavement();
+        } else {
+          sharp_corner(wrap_add(vz, 0x200), wrap_add(vx, 0x200));
+        }
+        break;
+      }
+      case PHYS_SSPLIT_B: {
+        if (abs_x < 0x78) {
+          set_pavement();
+        } else {
+          sharp_corner(wrap_add(vz, 0x200), wrap_add(0x200, wrap_negate(vx)));
+        }
+        break;
+      }
+      case PHYS_LSPLIT_A: {
+        if (vx >= 0x188 && vx <= 0x278) {
+          set_pavement();
+        } else {
+          large_corner(wrap_add(vz, 0x400), wrap_add(vx, 0x400));
+        }
+        break;
+      }
+      case PHYS_LSPLIT_B: {
+        if (vx >= static_cast<int16_t>(0xFD88) && vx <= static_cast<int16_t>(0xFE78)) {
+          set_pavement();
+        } else {
+          large_corner(wrap_add(vz, 0x400), wrap_add(0x400, wrap_negate(vx)));
+        }
+        break;
+      }
+      case PHYS_HIGH_ENTRANCE: {
+        // The entrance tapers: the drivable band runs from an inner to an outer
+        // x bound that both vary along z. Walk the band table until the z upper
+        // bound covers vz, then interpolate both bounds across the band.
+        const int16_t misc1c = static_cast<int16_t>(vx < 0 ? wrap_negate(vx) : vx);
+        int si = 0;
+        while (si < 5 && kHighEntrZBounds[si + 1] < vz) ++si;
+        auto interp = [&](const int16_t* bounds) -> int {
+          const int z0 = kHighEntrZBounds[si];
+          const int z1 = kHighEntrZBounds[si + 1];
+          const int b0 = bounds[si];
+          const int b1 = bounds[si + 1];
+          if (b1 == b0) return b0;
+          if (z1 == z0) return b0;
+          return (static_cast<int>(vz) - z0) * (b1 - b0) / (z1 - z0) + b0;
+        };
+        const int inner = interp(kHighEntrXInnBounds);
+        const int outer = interp(kHighEntrXOutBounds);
+        if (misc1c > inner && misc1c < outer) {
+          set_pavement();
+          break;
+        }
+        if (vz < 0) break;
+        if (misc1c > 0x78) break;
+        planindex = 1;
+        if (vz >= 0x14E) {
+          if (nvx <= static_cast<int16_t>(0xFF88)) {
+            wallindex = 0xBC;
+          } else if (nvx >= 0x78) {
+            wallindex = 0xBA;
+          }
+        } else if (nvx < 0) {
+          wallindex = 0xBD;
+        } else {
+          wallindex = 0xBB;
+        }
+        break;
+      }
+      case PHYS_HIGHWAY: {
+        if (abs_x > 0x168) break;
+        if (abs_x > 0x78) {
+          set_pavement();
+          break;
+        }
+        planindex = 1;
+        if (nvx > static_cast<int16_t>(0xFF88) && nvx < 0x78) {
+          wallindex = 0xBA;
+        } else if (nvx > static_cast<int16_t>(0xFF88)) {
+          wallindex = 0xBC;
+        } else {
+          wallindex = 0xBC;
+        }
+        break;
+      }
+      case PHYS_RAMP:
+      case PHYS_SOLID_RAMP: {
+        bool hill_side = true;  // byte_4392C
+        if (phys == PHYS_RAMP) {
+          if (vz > 0) {
+            hill_side = false;
+          } else if (nvz >= 0) {
+            wallindex = 0x66;
+          }
+        } else if (nvz >= 0x1DC) {
+          wallindex = 0x67;
+        }
+        const int16_t absnvx = nvx < 0 ? wrap_negate(nvx) : nvx;
+        if (absnvx < 0x78) {
+          planindex = 3;
+          set_pavement();
+          if (wallindex != -1) break;
+          if (vz < 0) break;
+          if (abs_x < 0x78) break;
+          wall_height = 0x2A;
+          wall_lower_bound = -12;
+          wallindex = vx >= 0 ? 0x65 : 0x64;
+        } else {
+          if (!hill_side) break;
+          if (abs_x > 0x78) break;
+          planindex = 3;
+          if (wallindex != -1) break;
+          wall_orient_mod = kOrient180;
+          wallindex = vx >= 0 ? 0x65 : 0x64;
+        }
+        break;
+      }
+      case PHYS_OVERPASS:
+      case PHYS_SOLID_ROAD:
+      case PHYS_ELEV_ROAD:
+      case PHYS_ELEV_SPAN: {
+        bool deck = true;  // byte_4392C
+        if (phys == PHYS_OVERPASS) {
+          if (static_cast<int>(world_pos.y) - terrain_height <= 0x186) {
+            if (abs_z <= 0x78) set_pavement();
+            break;
+          }
+          deck = false;
+        } else if (phys == PHYS_ELEV_ROAD || phys == PHYS_ELEV_SPAN) {
+          if (static_cast<int>(world_pos.y) - terrain_height <= 0x186) break;
+          deck = false;
+        }
+        const int16_t absnvx = nvx < 0 ? wrap_negate(nvx) : nvx;
+        if (absnvx <= 0x78) {
+          planindex = 2;
+          set_pavement();
+          if (deck) {
+            if (nvz >= 0x1DC) {
+              wallindex = 0x67;
+            } else if (nvz <= static_cast<int16_t>(0xFE24)) {
+              wallindex = 0x68;
+            }
+          }
+          if (abs_x < 0x78) break;
+          wall_height = 0x2A;
+          wallindex = vx >= 0 ? 0x65 : 0x64;
+        } else {
+          if (!deck) break;
+          if (abs_x > 0x78) break;
+          planindex = 2;
+          wall_height = 0x2A;
+          wall_orient_mod = kOrient180;
+          wallindex = nvx >= 0 ? 0x65 : 0x64;
+        }
+        break;
+      }
+      case PHYS_ELEV_CORNER: {
+        if (static_cast<int>(world_pos.y) - terrain_height <= 0x186) break;
+        const int turn = polar_radius(wrap_add(vz, 0x400), wrap_add(vx, 0x400)) - 0x600;
+        if (turn <= static_cast<int16_t>(0xFF6A)) break;
+        if (turn >= 0x96) break;
+        set_pavement();
+        planindex = 2;
+        if (turn >= static_cast<int16_t>(0xFF94) && turn <= 0x6C) break;
+        const int angle = polar_angle_2d(wrap_add(vz, 0x400), wrap_add(vx, 0x400));
+        int wallsel = (s16_wrap((angle & 0xFF) * 0x12) >> 8);
+        wallsel = -(wallsel - 0x11);
+        wall_height = 0x2A;
+        wall_lower_bound = -12;
+        wallindex = wrap_add(static_cast<int16_t>(wallsel), turn < 0 ? 0x69 : 0x7B);
+        break;
+      }
+      case PHYS_BANK_ENTRANCE_A:
+      case PHYS_BANK_ENTRANCE_B: {
+        int misc1c = (phys == PHYS_BANK_ENTRANCE_A) ? 0x23 : 0x19;
+        int misc1e = (phys == PHYS_BANK_ENTRANCE_A) ? 0 : 1;
+        const int16_t si = (phys == PHYS_BANK_ENTRANCE_A) ? static_cast<int16_t>(0xFD60)
+                                                          : static_cast<int16_t>(0xA0);
+        if (abs_x > 0x78) break;
+        if (misc1e == 0 && nvx <= static_cast<int16_t>(0xFF88)) {
+          wall_orient_mod = kOrient180;
+          wallindex = 0x64;
+        } else if (misc1e != 0 && nvx >= 0x78) {
+          wall_orient_mod = kOrient180;
+          wallindex = 0x65;
+        }
+        set_pavement();
+        const int16_t zz = vz;
+        if (zz < static_cast<int16_t>(0xFEB2)) {
+          planindex = misc1c;
+        } else if (zz >= 0x14E) {
+          planindex = misc1c + 9;
+        } else if (zz < static_cast<int16_t>(0xFF58)) {
+          planindex = misc1c + 1;
+          misc1e = 0;
+        } else if (zz < 0) {
+          planindex = misc1c + 3;
+          misc1e = 1;
+        } else if (zz < 0xA8) {
+          planindex = misc1c + 5;
+          misc1e = 2;
+        } else if (zz < 0x14E) {
+          planindex = misc1c + 7;
+          misc1e = 3;
+        }
+        const int16_t adj = wrap_sub(vz, kBkRdEntrZAdjust[misc1e]);
+        const int proj = fixed::multiply_and_scale(fixed::sin_fast(static_cast<uint16_t>(si)), adj) +
+                         fixed::multiply_and_scale(fixed::cos_fast(static_cast<uint16_t>(si)), vx);
+        if (proj > 0) ++planindex;
+        break;
+      }
+      case PHYS_BANK_ROAD: {
+        if (abs_x > 0x78) break;
+        set_pavement();
+        planindex = 6;
+        if (nvx < 0x78) break;
+        wall_orient_mod = kOrient180;
+        wallindex = 0x65;
+        break;
+      }
+      case PHYS_BANK_CORNER: {
+        const int turn = polar_radius(wrap_add(vz, 0x400), wrap_add(vx, 0x400)) - 0x600;
+        if (turn <= static_cast<int16_t>(0xFF88)) break;
+        if (turn >= 0x7E) break;
+        const int angle = polar_angle_2d(wrap_add(vz, 0x400), wrap_add(vx, 0x400));
+        int wallsel = (s16_wrap((angle & 0xFF) * 0x12) >> 8);
+        wallsel = -(wallsel - 0x11);
+        planindex = wallsel + 7;
+        set_pavement();
+        if (turn > 0x66) {
+          wall_orient_mod = kOrient180;
+          wallindex = wallsel + 0x7B;
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  // code_bto_blank: hill terrain (7..18) selects a slope plane even with no
+  // element.
+  if (terrain >= 7 && terrain <= 18) {
+    // Recompute element-relative coordinates (raw, un-rotated).
+    vx = raw_vx;
+    vz = raw_vz;
+    // Direction variants rotate the coordinate pair.
+    const int variant = (terrain - 7) & 3;
+    switch (variant) {
+      case 0:
+        break;
+      case 1: {  // loc_1F832
+        const int16_t ox = vx;
+        vx = vz;
+        vz = wrap_negate(ox);
+        break;
+      }
+      case 2: {  // loc_1F84E
+        vx = wrap_negate(vx);
+        vz = wrap_negate(vz);
+        break;
+      }
+      case 3: {  // loc_1F866
+        const int16_t ox = vx;
+        vx = wrap_negate(vz);
+        vz = ox;
+        break;
+      }
+    }
+    switch (terrain) {
+      case 7:
+      case 8:
+      case 9:
+      case 10:
+        elem_orient = variant == 0 ? kOrient0 : (variant == 1 ? kOrient270 : (variant == 2 ? kOrient180 : kOrient90));
+        if (planindex == 0) planindex = 3;
+        break;
+      case 11:
+      case 12:
+      case 13:
+      case 14: {
+        elem_orient = variant == 0 ? kOrient0 : (variant == 1 ? kOrient270 : (variant == 2 ? kOrient180 : kOrient90));
+        const int16_t s = static_cast<int16_t>(0xFF80);
+        const int proj = fixed::multiply_and_scale(fixed::sin_fast(static_cast<uint16_t>(s)), vz) +
+                         fixed::multiply_and_scale(fixed::cos_fast(static_cast<uint16_t>(s)), vx);
+        if (proj < 0) planindex = 4;
+        break;
+      }
+      case 15:
+      case 16:
+      case 17:
+      case 18: {
+        elem_orient = variant == 0 ? kOrient0 : (variant == 1 ? kOrient270 : (variant == 2 ? kOrient180 : kOrient90));
+        const int16_t s = static_cast<int16_t>(0xFF80);
+        const int proj = fixed::multiply_and_scale(fixed::sin_fast(static_cast<uint16_t>(s)), vz) +
+                         fixed::multiply_and_scale(fixed::cos_fast(static_cast<uint16_t>(s)), vx);
+        if (proj > 0) {
+          planindex = 5;
+        } else {
+          terrain_height = kElevatedHeight;
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  // Final plane selection (1F8CD..1F9D9).
+  int final_plane = 0;
+  if (planindex > 0) {
+    int base = planindex * 4;
+    switch (elem_orient) {
+      case kOrient90:
+        base += 3;
+        break;
+      case kOrient180:
+        base += 2;
+        break;
+      case kOrient270:
+        base += 1;
+        break;
+      default:
+        break;
+    }
+    final_plane = base;
+  }
+  if (final_plane < 0 || static_cast<size_t>(final_plane) >= planes_.size()) final_plane = 0;
+
+  if (surface_type == static_cast<int8_t>(CarSurfaceType::Grass)) {
+    terrain_height += ((world_x ^ world_z) >> 8) & 1;
+  } else {
+    terrain_height += kNonGrassHeightOffset;
+  }
+
+  // Wall orientation and start point (1F9E3..1FAD0).
+  int16_t wall_start_x = 0;
+  int16_t wall_start_z = 0;
+  int16_t wall_orientation = 0;
+  if (wallindex >= 0 && static_cast<size_t>(wallindex) < walls_.size()) {
+    const TrackWall& wall = walls_[wallindex];
+    wall_orientation = static_cast<int16_t>(
+        (wrap_negate(wall.orientation) + elem_orient + wall_orient_mod) & 0x300);
+    switch (elem_orient) {
+      case kOrient0:
+        wall_start_x = wall.x;
+        wall_start_z = wall.z;
+        break;
+      case kOrient90:
+        wall_start_x = wall.z;
+        wall_start_z = wrap_negate(wall.x);
+        break;
+      case kOrient180:
+        wall_start_x = wrap_negate(wall.x);
+        wall_start_z = wrap_negate(wall.z);
+        break;
+      case kOrient270:
+        wall_start_x = wrap_negate(wall.z);
+        wall_start_z = wall.x;
+        break;
+      default:
+        break;
+    }
+    wall_start_x = wrap_add(wall_start_x, elem_x_center);
+    wall_start_z = wrap_add(wall_start_z, elem_z_center);
+  } else {
+    wallindex = -1;
+  }
+
+  sample.plane_index = static_cast<int16_t>(final_plane);
+  sample.terrain_height = static_cast<int16_t>(terrain_height);
+  sample.surface_type = surface_type;
+  sample.elem_x_center = elem_x_center;
+  sample.elem_z_center = elem_z_center;
+  sample.wall_index = static_cast<int16_t>(wallindex);
+  sample.wall_start_x = wall_start_x;
+  sample.wall_start_z = wall_start_z;
+  sample.wall_orientation = wall_orientation;
+  sample.wall_height = static_cast<int16_t>(wall_height);
+  sample.wall_lower_bound = static_cast<int16_t>(wall_lower_bound);
+  sample.physical_model = phys;
+  *out = sample;
 }
 
-} // namespace s3d::physics
+void TrackCollision::build_track_object(const fixed::Vec3& world_pos,
+                                        const fixed::Vec3& next_world_pos,
+                                        CollisionSample* out) const {
+  if (track_ == nullptr) {
+    if (out != nullptr) {
+      CollisionSample sample;
+      sample.plane_index = 0;
+      sample.surface_type = static_cast<int8_t>(CarSurfaceType::Grass);
+      *out = sample;
+    }
+    return;
+  }
+  build_track_object_from_track(*track_, world_pos, next_world_pos, out);
+}
+
+}  // namespace s3d::physics

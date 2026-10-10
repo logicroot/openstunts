@@ -11,6 +11,7 @@
 #include "assets/trk.h"
 #include "game/scene.h"
 #include "physics/car_state.h"
+#include "physics/track_collision.h"
 #include "render/camera.h"
 #include "render/mesh.h"
 
@@ -49,6 +50,7 @@ class DriveScene : public Scene {
   physics::CarState car_;
   physics::CarState display_prev_;  // pose at the last physics tick boundary
   double accumulator_ = 0.0;        // leftover time since the last physics tick
+  physics::TrackCollision collision_;  // element planes/walls from GAME.PRE
 
   Mesh track_mesh_;
   Mesh car_mesh_;

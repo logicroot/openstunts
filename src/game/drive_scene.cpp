@@ -158,6 +158,19 @@ bool DriveScene::on_enter() {
     S3D_WARN("player car shapes not found; driving invisible");
   }
 
+  // ---- Track collision -----------------------------------------------------
+  // The element plane/wall tables live in GAME.PRE. With them bound to the
+  // track grid the wheels ride ramps, banked roads and elevated terrain; absent
+  // the file the motion code falls back to the flat 2D ground sampler.
+  if (!asset_dir_.empty() &&
+      collision_.load_from_game_pre(path_join(asset_dir_, "GAME.PRE"))) {
+    collision_.set_track(&track_);
+    S3D_INFO("track collision loaded: %zu planes, %zu walls", collision_.plane_count(),
+             collision_.wall_count());
+  } else {
+    S3D_WARN("GAME.PRE not found; using the flat 2D ground sampler");
+  }
+
   reset_car();
   S3D_INFO("drive scene ready");
   return true;
@@ -209,7 +222,7 @@ void DriveScene::physics_tick(const Controls& controls) {
   physics::update_player_steering(input_flags, &car_, physics::kGameFrameRateNormal);
   physics::update_grip(&car_, spec_);
   const auto sampler = [this](float wx, float wz) { return ground_sample(track_, wx, wz); };
-  physics::step_car_motion(&car_, spec_, physics::kGameFrameRateNormal, sampler);
+  physics::step_car_motion(&car_, spec_, physics::kGameFrameRateNormal, sampler, &collision_);
 }
 
 void DriveScene::update_camera() {

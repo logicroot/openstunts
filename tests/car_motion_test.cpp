@@ -3,12 +3,17 @@
 // The flat sampler models a paved start/finish cell at height 1.
 
 #include <cstdint>
+#include <string>
 
+#include "assets/trk.h"
+#include "core/paths.h"
 #include "physics/car_engine.h"
 #include "physics/car_motion.h"
 #include "physics/car_state.h"
 #include "physics/car_steering.h"
+#include "physics/track_collision.h"
 #include "tiny_test.h"
+#include "world/track_elevation.h"
 
 using namespace s3d;
 using namespace s3d::physics;
@@ -176,4 +181,163 @@ TEST(motion_car_never_sinks_through_road) {
   }
   // Pivot rests exactly at ground+6; allow one tick of spring slack.
   EXPECT_TRUE(car.car_position.y >= kRestPivotY - 64);
+}
+
+// ---------------------------------------------------------------------------
+// Track-collision-aware wheels. When a loaded TrackCollision with a bound
+// track is passed, the wheels ride the element planes instead of the flat 2D
+// sampler. These skip when the Stunts assets are unavailable.
+// ---------------------------------------------------------------------------
+namespace {
+
+constexpr int kElevatedHeight = 450;
+
+bool load_collision(TrackCollision* tc) {
+  const std::string dir = find_asset_dir();
+  if (dir.empty()) return false;
+  return tc->load_from_game_pre(path_join(dir, "GAME.PRE"));
+}
+
+void fill_terrain(Track* t, uint8_t terrain) {
+  for (uint8_t& byte : t->terrain) byte = terrain;
+}
+
+}  // namespace
+
+TEST(motion_track_collision_uses_track_surface) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  Track track;  // empty: no elements, plain grass
+  tc.set_track(&track);
+
+  CarSpec spec = test_spec();
+  CarState car = parked_car(spec);
+  car.car_position.y = 6 << 6;  // rest on the flat plane at y = 0
+  step_car_motion(&car, spec, kGameFrameRateNormal, flat_paved_world, &tc);
+
+  // The collision model reports grass, not the flat sampler's paved surface.
+  for (int i = 0; i < kCarWheelCount; ++i) {
+    EXPECT_EQ(car.car_surfaceWhl[i], kCarSurfaceGrass);
+  }
+  EXPECT_EQ(car.car_sumSurfAllWheels, 4);
+  // Grass has a 1-unit checkerboard, so the pivot stays within [6,7] + 1.
+  EXPECT_TRUE(car.car_position.y >= (6 << 6) && car.car_position.y <= (8 << 6));
+}
+
+TEST(motion_track_collision_elevated_terrain_lifts_car) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  Track track;
+  fill_terrain(&track, 6);  // whole track is an elevated plateau (+450)
+  tc.set_track(&track);
+
+  CarSpec spec = test_spec();
+  CarState car = parked_car(spec);
+  car.car_position.y = (kElevatedHeight + 6) << 6;
+  step_car_motion(&car, spec, kGameFrameRateNormal, flat_paved_world, &tc);
+
+  // The plateau lifts the car ~450 units above the flat sampler's rest height.
+  // (Grass adds a 1-unit checkerboard, so the exact pivot varies by a few
+  // units; the flat sampler would have left it at kRestPivotY = 7 << 6.)
+  EXPECT_TRUE(car.car_position.y >= kRestPivotY + 400);
+  EXPECT_TRUE(car.car_position.y >= (kElevatedHeight + 5) << 6);
+  EXPECT_TRUE(car.car_position.y <= (kElevatedHeight + 8) << 6);
+  EXPECT_EQ(car.car_sumSurfAllWheels, 4);
+  for (int i = 0; i < kCarWheelCount; ++i) {
+    EXPECT_TRUE(car.car_surfaceWhl[i] != kWheelContactNone);
+  }
+}
+
+TEST(motion_track_collision_unbound_falls_back_to_sampler) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  // No set_track: the model has no element grid, so motion must fall back to
+  // the caller's ground sampler (paved at height 1).
+  CarSpec spec = test_spec();
+  CarState car = parked_car(spec);
+  step_car_motion(&car, spec, kGameFrameRateNormal, flat_paved_world, &tc);
+
+  EXPECT_EQ(car.car_position.y, kRestPivotY);
+  for (int i = 0; i < kCarWheelCount; ++i) {
+    EXPECT_EQ(car.car_surfaceWhl[i], kCarSurfacePaved);
+  }
+}
+
+TEST(motion_track_collision_flat_plane_travel_matches) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  Track track;
+  tc.set_track(&track);
+
+  CarSpec spec = test_spec();
+  CarState car = parked_car(spec);
+  car.car_position.y = 6 << 6;
+  car.car_actual_speed = 4096;
+
+  const int32_t previous_z = car.car_position.z;
+  step_car_motion(&car, spec, kGameFrameRateNormal, flat_paved_world, &tc);
+
+  // Plane 0 is flat, so the plane-aware travel must match the no-plane branch:
+  // 4096 * 1408 / 15360 = 375 world units along +z.
+  EXPECT_EQ(car.car_position.z - previous_z, 375);
+  EXPECT_EQ(car.car_position.x, kCellCenterLong);
+  EXPECT_EQ(car.car_rotate.x, 0);
+}
+
+TEST(motion_track_collision_drives_real_track_without_sinking) {
+  const std::string dir = find_asset_dir();
+  if (dir.empty()) {
+    std::printf("  (skipped: no Stunts asset dir)\n");
+    return;
+  }
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no GAME.PRE)\n");
+    return;
+  }
+  Track track = Track::load(path_join(dir, "DEFAULT.TRK"));
+  tc.set_track(&track);
+
+  CarSpec spec = test_spec();
+  CarState car = parked_car(spec);
+  car.car_position.x = (7 * 1024 + 512) << 6;
+  car.car_position.z = (5 * 1024 + 512) << 6;
+  car.car_position.y = (1 + 6) << 6;
+
+  const auto sampler = [&track](float wx, float wz) {
+    const world::GroundSample g = world::ground_sample_at(track, wx, wz);
+    GroundSample out;
+    out.height = g.height;
+    out.surface = g.surface;
+    return out;
+  };
+
+  int ground_ticks = 0;
+  for (int i = 0; i < 400; ++i) {
+    const uint8_t flags =
+        kInputAccelerate | (((i / 40) % 2) ? kInputSteerLeft : kInputSteerRight);
+    update_car_speed(flags, spec, &car, kGameFrameRateNormal);
+    update_player_steering(flags, &car, kGameFrameRateNormal);
+    update_grip(&car, spec);
+    step_car_motion(&car, spec, kGameFrameRateNormal, sampler, &tc);
+
+    // The plane push-out must keep the car on the world floor; a wild value
+    // signals an unstable plane transition.
+    EXPECT_TRUE(car.car_position.y >= 0);
+    EXPECT_TRUE(car.car_position.y < (800 << 6));
+    if (car.car_sumSurfAllWheels > 0) ++ground_ticks;
+  }
+  EXPECT_TRUE(ground_ticks > 200);
 }

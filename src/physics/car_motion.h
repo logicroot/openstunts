@@ -4,10 +4,12 @@
 // apply_wheel_suspension / derive_car_pose_from_wheels) and `math.c`
 // (transform_wheel_travel_to_world).
 //
-// The original collides wheels against dozens of cached track planes; the
-// reduced model replaces that with a caller-supplied ground sampler, so the
-// car rides whatever surface the renderer shows. Track-object collision
-// (walls, ramps, loops) is deferred.
+// The original collides wheels against dozens of cached track planes. The
+// reduced model uses a caller-supplied 2D ground sampler by default; when a
+// loaded TrackCollision is passed it instead resolves the active track plane
+// under each wheel (ramps, banked roads, elevated terrain) via
+// build_track_object / plane_signed_distance and travels along it via
+// transform_wheel_travel_to_world. Wall/loop collisions are still deferred.
 
 #include <cstdint>
 #include <functional>
