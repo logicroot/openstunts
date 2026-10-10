@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "physics/fixed_math.h"
+#include "world/material.h"
 #include "world/mesh_builder.h"
 #include "world/shape_mesh.h"
 #include "world/world_units.h"
@@ -98,19 +99,14 @@ void add_ground_quad(MeshBuilder& mb, float cx, float cz, const glm::vec4& color
 
 }  // namespace
 
-Mesh build_track_shape_mesh(const Track& track, const ShapeLibrary& lib,
-                            TrackShapeStats* stats) {
-  MeshBuilder mb;
-  build_track_shape_geometry(track, lib, mb, stats);
-  return mb.to_mesh();
-}
+namespace {
 
-void build_track_shape_geometry(const Track& track, const ShapeLibrary& lib,
-                                MeshBuilder& mb, TrackShapeStats* stats) {
+void build_track_shape_geometry_impl(const Track& track, const ShapeLibrary& lib,
+                                     MeshBuilder& mb, const PaintColorFn& paint_color,
+                                     const glm::vec4& ground_color, TrackShapeStats* stats) {
   TrackShapeStats local;
   if (stats != nullptr) *stats = local;
 
-  const glm::vec4 ground_color(0.33f, 0.55f, 0.26f, 1.0f);
   const TerrainShape* terrains = terrain_shapes();
 
   // ---- Terrain -------------------------------------------------------------
@@ -127,7 +123,7 @@ void build_track_shape_geometry(const Track& track, const ShapeLibrary& lib,
         const Shape3D* s = lookup(lib, ts.shape);
         const float height = (t == 6) ? kElevatedHeight : 0.0f;
         if (s != nullptr) {
-          append_shape(mb, *s, fixed_model({cx, height, cz}, ts.rot_y), track_paint_color);
+          append_shape(mb, *s, fixed_model({cx, height, cz}, ts.rot_y), paint_color);
           ++local.terrain_shapes;
         } else {
           ++local.missing_shapes;
@@ -156,7 +152,7 @@ void build_track_shape_geometry(const Track& track, const ShapeLibrary& lib,
 
       const Shape3D* s = lookup(lib, def.shape);
       if (s != nullptr) {
-        append_shape(mb, *s, fixed_model(pos, def.rot_y), track_paint_color);
+        append_shape(mb, *s, fixed_model(pos, def.rot_y), paint_color);
         ++local.elements;
       } else {
         ++local.missing_shapes;
@@ -168,7 +164,7 @@ void build_track_shape_geometry(const Track& track, const ShapeLibrary& lib,
         if (overlay_shape(def.overlay, &oshape, &orot)) {
           const Shape3D* os = lookup(lib, oshape);
           if (os != nullptr) {
-            append_shape(mb, *os, fixed_model(pos, orot), track_paint_color);
+            append_shape(mb, *os, fixed_model(pos, orot), paint_color);
             ++local.overlays;
           } else {
             ++local.missing_shapes;
@@ -179,6 +175,36 @@ void build_track_shape_geometry(const Track& track, const ShapeLibrary& lib,
   }
 
   if (stats != nullptr) *stats = local;
+}
+
+}  // namespace
+
+Mesh build_track_shape_mesh(const Track& track, const ShapeLibrary& lib,
+                            TrackShapeStats* stats) {
+  MeshBuilder mb;
+  build_track_shape_geometry(track, lib, mb, stats);
+  return mb.to_mesh();
+}
+
+Mesh build_track_shape_mesh(const Track& track, const ShapeLibrary& lib,
+                            const Palette& palette, TrackShapeStats* stats) {
+  MeshBuilder mb;
+  build_track_shape_geometry(track, lib, mb, palette, stats);
+  return mb.to_mesh();
+}
+
+void build_track_shape_geometry(const Track& track, const ShapeLibrary& lib,
+                                MeshBuilder& mb, TrackShapeStats* stats) {
+  build_track_shape_geometry_impl(track, lib, mb, track_paint_color,
+                                  glm::vec4(0.33f, 0.55f, 0.26f, 1.0f), stats);
+}
+
+void build_track_shape_geometry(const Track& track, const ShapeLibrary& lib,
+                                MeshBuilder& mb, const Palette& palette,
+                                TrackShapeStats* stats) {
+  build_track_shape_geometry_impl(
+      track, lib, mb, [&palette](uint8_t paint) { return material_color(paint, palette); },
+      material_color(16, palette), stats);
 }
 
 }  // namespace s3d::world

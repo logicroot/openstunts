@@ -55,3 +55,33 @@ TEST(build_track_shape_geometry_is_deterministic) {
   EXPECT_EQ(a.vertex_count(), b.vertex_count());
   EXPECT_EQ(a.indices().size(), b.indices().size());
 }
+
+TEST(build_track_shape_geometry_uses_palette_colors) {
+  const std::string dir = find_asset_dir();
+  if (dir.empty()) return;
+  ShapeLibrary lib;
+  lib.load_p3s(path_join(dir, "GAME1.P3S"));
+  lib.load_p3s(path_join(dir, "GAME2.P3S"));
+  if (lib.shapes().empty()) return;
+  Track track = Track::load(path_join(dir, "DEFAULT.TRK"));
+
+  // Fill every palette entry with one distinctive colour: if the builder routes
+  // paint indices through the material table + palette, every vertex (including
+  // the flat ground quad) ends up that colour. The fallback path would not.
+  Palette pal;
+  for (int i = 0; i < 256; ++i) {
+    pal.rgb8[i][0] = 51;
+    pal.rgb8[i][1] = 102;
+    pal.rgb8[i][2] = 153;
+  }
+  const glm::vec4 expected(51.0f / 255.0f, 102.0f / 255.0f, 153.0f / 255.0f, 1.0f);
+
+  MeshBuilder mb;
+  build_track_shape_geometry(track, lib, mb, pal);
+  EXPECT_TRUE(mb.vertex_count() > 0);
+  bool all_match = true;
+  for (const Vertex& v : mb.vertices()) {
+    if (v.color != expected) all_match = false;
+  }
+  EXPECT_TRUE(all_match);
+}

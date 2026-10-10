@@ -8,6 +8,7 @@
 #include <glm/glm.hpp>
 
 #include "assets/car.h"
+#include "assets/palette.h"
 #include "assets/trk.h"
 #include "game/scene.h"
 #include "physics/car_state.h"
@@ -51,6 +52,7 @@ class DriveScene : public Scene {
   physics::CarState display_prev_;  // pose at the last physics tick boundary
   double accumulator_ = 0.0;        // leftover time since the last physics tick
   physics::TrackCollision collision_;  // element planes/walls from GAME.PRE
+  Palette palette_;                    // VGA colours for track materials
 
   Mesh track_mesh_;
   Mesh car_mesh_;

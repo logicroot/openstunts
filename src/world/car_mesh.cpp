@@ -8,8 +8,9 @@ namespace s3d::world {
 namespace {
 
 // Wheel/chassis primitives in the car archives use paint index 38; the body
-// picks one of the livery paints (44..79) per material. Until the material
-// table is loaded we draw the tyres dark and everything else in `body_color`.
+// picks one of the livery paints (44..79). Player livery selection is not
+// modelled yet, so the tyres are drawn dark and everything else in the
+// caller-supplied `body_color`.
 constexpr uint8_t kWheelPaint = 38;
 
 }  // namespace

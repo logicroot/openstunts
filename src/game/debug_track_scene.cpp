@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 
+#include "assets/palette.h"
 #include "assets/shape3d.h"
 #include "core/log.h"
 #include "core/paths.h"
@@ -41,7 +42,14 @@ bool DebugTrackScene::on_enter() {
   if (!lib.shapes().empty()) {
     world::TrackShapeStats stats;
     MeshBuilder mb;
-    world::build_track_shape_geometry(track_, lib, mb, &stats);
+    Palette palette;
+    const bool have_palette =
+        !asset_dir_.empty() && load_vga_palette(path_join(asset_dir_, "SDMAIN.PVS"), &palette);
+    if (have_palette) {
+      world::build_track_shape_geometry(track_, lib, mb, palette, &stats);
+    } else {
+      world::build_track_shape_geometry(track_, lib, mb, &stats);
+    }
     S3D_INFO("track shapes: ground=%d terrain=%d elements=%d overlays=%d missing=%d",
              stats.ground_cells, stats.terrain_shapes, stats.elements, stats.overlays,
              stats.missing_shapes);

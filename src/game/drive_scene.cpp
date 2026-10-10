@@ -8,6 +8,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include "assets/palette.h"
 #include "core/log.h"
 #include "core/paths.h"
 #include "physics/car_engine.h"
@@ -135,7 +136,14 @@ bool DriveScene::on_enter() {
   if (!lib.shapes().empty()) {
     world::TrackShapeStats stats;
     MeshBuilder mb;
-    world::build_track_shape_geometry(track_, lib, mb, &stats);
+    // Colours come from the real material table sampled from the VGA palette
+    // (SDMAIN.PVS `!pal`); fall back to the built-in table if it is missing.
+    if (!asset_dir_.empty() && load_vga_palette(path_join(asset_dir_, "SDMAIN.PVS"), &palette_)) {
+      world::build_track_shape_geometry(track_, lib, mb, palette_, &stats);
+    } else {
+      S3D_WARN("SDMAIN.PVS palette not found; using fallback track colours");
+      world::build_track_shape_geometry(track_, lib, mb, &stats);
+    }
     S3D_INFO("drive track: ground=%d terrain=%d elements=%d overlays=%d missing=%d",
              stats.ground_cells, stats.terrain_shapes, stats.elements, stats.overlays,
              stats.missing_shapes);

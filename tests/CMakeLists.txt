@@ -9,6 +9,7 @@ add_executable(s3d_tests
   palette_test.cpp
   track_objects_test.cpp
   track_shapes_test.cpp
+  material_test.cpp
   car_mesh_test.cpp
   car_engine_test.cpp
   car_steering_test.cpp
