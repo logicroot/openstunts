@@ -8,6 +8,7 @@
 #include "assets/compression.h"
 #include "assets/res_file.h"
 #include "physics/wrap_math.h"
+#include "world/track_elevation.h"
 
 namespace s3d::physics {
 
@@ -199,4 +200,48 @@ void TrackCollision::transform_wheel_travel_to_world(int16_t travel, int16_t whe
   fixed::mat_mul_vector(forward, heading_rotation, &plane_direction);
   fixed::mat_mul_vector(plane_direction, car_to_world, wheel_world_travel);
 }
-} // namespace
+
+void TrackCollision::build_track_object_from_track(const s3d::Track& track, const fixed::Vec3& world_pos, const fixed::Vec3& next_world_pos, CollisionSample* out) {
+  if (!out) return;
+  *out = CollisionSample{};
+  if (!loaded_) return;
+
+  // Find cell
+  int x = world_pos.x / kTileSize;
+  int z = world_pos.z / kTileSize;
+  if (x < 0) x = 0;
+  if (z < 0) z = 0;
+  if (x >= kTrackSize) x = kTrackSize - 1;
+  if (z >= kTrackSize) z = kTrackSize - 1;
+
+  uint8_t terrain_tile = track.terrain_at(x, z);
+  // get terrain height
+  int16_t terrain_height = 0;
+  if (terrain_tile == 6) terrain_height = 450;
+  out->terrain_height = terrain_height;
+  out->elem_x_center = x * kTileSize + kTileSize / 2;
+  out->elem_z_center = z * kTileSize + kTileSize / 2;
+
+  // Resolve element (handle continuations roughly)
+  uint8_t item = track.item(x, z);
+  int ox = x, oy = z;
+  if (item == 0xFD) { ox = x - 1; oy = z + 1; }
+  else if (item == 0xFE) { oy = z + 1; }
+  else if (item == 0xFF) { ox = x - 1; }
+  if (ox >= 0 && oy >= 0 && ox < kTrackSize && oy < kTrackSize) {
+    item = track.item(ox, oy);
+  }
+
+  // Set default surface
+  out->surface_type = static_cast<int8_t>(CarSurfaceType::Grass);
+  // check drivable via track objects/elevation logic
+  world::GroundSample gs = world::ground_sample_at(track, static_cast<float>(world_pos.x), static_cast<float>(world_pos.z));
+  out->surface_type = static_cast<int8_t>(gs.surface);
+
+  // For now, don't set specific planes/walls - keep minimal
+  out->plane_index = -1;
+  out->wall_index = -1;
+  out->wall_collision_enabled = 1;
+}
+
+} // namespace s3d::physics

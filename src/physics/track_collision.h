@@ -87,6 +87,7 @@ class TrackCollision {
   bool is_loaded() const { return loaded_; }
 
   void build_track_object(const fixed::Vec3& world_pos, const fixed::Vec3& next_world_pos, CollisionSample* out);
+  void build_track_object_from_track(const s3d::Track& track, const fixed::Vec3& world_pos, const fixed::Vec3& next_world_pos, CollisionSample* out);
   int16_t plane_signed_distance(int16_t plane_index, int16_t x, int16_t y, int16_t z) const;
   void transform_wheel_travel_to_world(int16_t travel, int16_t wheel_heading_offset, const fixed::Mat3& car_to_world,
                                       int16_t car_yaw, int16_t car_pitch, int16_t car_roll,
