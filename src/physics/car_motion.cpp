@@ -59,7 +59,102 @@ int16_t difference_word_wrap(int32_t left, int32_t right) {
   return static_cast<int16_t>(wrap_sub32(left, right));
 }
 
+// Ported from restunts math.c `vector_op_unk` with i == 0: the point where the
+// segment (a -> b) crosses z == 0 (used for the swept wheel/wall test).
+fixed::Vec3 segment_cross_z0(fixed::Vec3 a, fixed::Vec3 b) {
+  fixed::Vec3 out{};
+  out.z = 0;
+  int32_t var_4 = 0 - static_cast<int32_t>(b.z);
+  int32_t var_2 = static_cast<int32_t>(a.z) - static_cast<int32_t>(b.z);
+  if (var_2 < 0) {
+    var_4 >>= 1;
+    var_2 >>= 1;
+  }
+  if (var_2 != 0) {
+    out.x = static_cast<int16_t>((static_cast<int32_t>(a.x) - b.x) * var_4 / var_2 + b.x);
+    out.y = static_cast<int16_t>((static_cast<int32_t>(a.y) - b.y) * var_4 / var_2 + b.y);
+  } else {
+    out.x = b.x;
+    out.y = b.y;
+  }
+  return out;
+}
+
 }  // namespace
+
+WallContact resolve_wall_contact(const CollisionSample& sample, int plane_distance,
+                                 const fixed::Vec3& pre_word, const fixed::Vec3& post_word,
+                                 int16_t travel, int16_t yaw, int16_t pitch, int16_t roll) {
+  WallContact contact;
+  if (sample.wall_index < 0 || travel == 0) return contact;
+  // Band test (stateply.c loc_15264..loc_15270): the wheel must sit inside the
+  // wall's [lower_bound, height) slice of the plane distance.
+  if (plane_distance <= sample.wall_lower_bound || plane_distance >= sample.wall_height) {
+    return contact;
+  }
+
+  // Wheel positions relative to the wall segment origin (x/z plane only).
+  const fixed::Vec3 rel_pre{static_cast<int16_t>(pre_word.x - sample.wall_start_x), 0,
+                            static_cast<int16_t>(pre_word.z - sample.wall_start_z)};
+  const fixed::Vec3 rel_post{static_cast<int16_t>(post_word.x - sample.wall_start_x), 0,
+                             static_cast<int16_t>(post_word.z - sample.wall_start_z)};
+  fixed::Mat3 wall_frame;
+  fixed::mat_rot_y(wrap_negate(sample.wall_orientation) - fixed::kAngleQuarter, &wall_frame);
+  fixed::Vec3 c_pre, c_post;
+  fixed::mat_mul_vector(rel_pre, wall_frame, &c_pre);
+  fixed::mat_mul_vector(rel_post, wall_frame, &c_post);
+
+  // Same side of the wall line at both ends: the wheel did not cross it.
+  if ((c_pre.z > 0 && c_post.z > 0) || (c_pre.z < 0 && c_post.z < 0)) return contact;
+
+  // Order by the across-wall coordinate. `swapped` mirrors `var_136`.
+  bool swapped = false;
+  fixed::Vec3 lo = c_post;
+  fixed::Vec3 hi = c_pre;
+  if (c_post.z > c_pre.z) {
+    swapped = true;
+    lo = c_pre;
+    hi = c_post;
+  }
+
+  int32_t var_f2 = 0;  // penetration past the wall (var_F2)
+  int32_t var_f4 = 0;  // travel that survives (var_pSpeed2Scaled - var_F2)
+  if (lo.z == 0) {
+    var_f4 = travel;
+  } else if (hi.z == 0) {
+    var_f2 = travel;
+  } else {
+    const fixed::Vec3 cross = segment_cross_z0(lo, hi);
+    const fixed::Vec3 delta{static_cast<int16_t>(lo.x - cross.x),
+                            static_cast<int16_t>(lo.y - cross.y),
+                            static_cast<int16_t>(lo.z - cross.z)};
+    const fixed::Vec3 delta6{static_cast<int16_t>(delta.x << kWorldToLongShift),
+                             static_cast<int16_t>(delta.y << kWorldToLongShift),
+                             static_cast<int16_t>(delta.z << kWorldToLongShift)};
+    var_f2 = fixed::polar_radius3d(delta6);
+    var_f4 = travel - var_f2;
+  }
+
+  // Slide direction along the wall (stateply.c loc_1540C..loc_1546E).
+  int16_t var_ee = static_cast<int16_t>((wrap_negate(yaw) - sample.wall_orientation) & 0x3FF);
+  int16_t deflection_x = 0;
+  if (var_ee < 0x100 || var_ee > 0x300) {
+    var_ee = sample.wall_orientation;
+    deflection_x = 768;
+  } else {
+    var_ee = static_cast<int16_t>((sample.wall_orientation + 0x200) & 0x3FF);
+    deflection_x = -768;
+  }
+  fixed::Vec3 wall_vec{deflection_x, 0, static_cast<int16_t>(var_f2)};
+  if (swapped) wall_vec.x = wrap_negate(wall_vec.x);
+  const fixed::Mat3 deflect_frame =
+      fixed::mat_rot_zxy(wrap_negate(roll), wrap_negate(pitch), var_ee, 0);
+  fixed::mat_mul_vector(wall_vec, deflect_frame, &contact.deflection);
+
+  contact.hit = true;
+  contact.remaining_travel = var_f4;
+  return contact;
+}
 
 int16_t update_wheel_suspension(CarState* car, int16_t wheel_index, int16_t contact_delta) {
   const int16_t previous_deflection = car->car_suspension_deflection[wheel_index];
@@ -238,6 +333,75 @@ void step_car_motion(CarState* car, const CarSpec& spec, int frames_per_sec,
       current[i].x = wrap_add32(current[i].x, world_travel.x);
       current[i].y = wrap_add32(current[i].y, world_travel.y);
       current[i].z = wrap_add32(current[i].z, world_travel.z);
+    }
+  }
+
+  // ---- Wall collision response (stateply.c loc_15257..loc_15599) -----------
+  // build_track_object resolves the active wall for each tile; here we sweep
+  // each wheel across the wall line and, on a crossing inside the wall's height
+  // band, push the wheels back along the wall and drain the blocked fraction of
+  // the car's speed. The crash state machine (restunts `update_crash_state(1)`)
+  // is not ported yet, so only the geometry + speed loss are reproduced.
+  if (use_track_collision && travel != 0) {
+    for (int i = 0; i < kCarWheelCount; ++i) {
+      const fixed::Vec3 pre_word{static_cast<int16_t>(previous[i].x >> kWorldToLongShift),
+                                 static_cast<int16_t>(previous[i].y >> kWorldToLongShift),
+                                 static_cast<int16_t>(previous[i].z >> kWorldToLongShift)};
+      const fixed::Vec3 post_word{static_cast<int16_t>(current[i].x >> kWorldToLongShift),
+                                  static_cast<int16_t>(current[i].y >> kWorldToLongShift),
+                                  static_cast<int16_t>(current[i].z >> kWorldToLongShift)};
+      // The element/plane is resolved at the pre-travel position (matching the
+      // reference's car_whlWorldCrds1); the wall sweep itself uses post.
+      CollisionSample wall_sample;
+      collision->build_track_object_from_track(*collision->track(), pre_word, post_word,
+                                               &wall_sample);
+      if (wall_sample.wall_index < 0) continue;
+      const int plane_distance = collision->plane_signed_distance(
+          wall_sample.plane_index, post_word.x, post_word.y, post_word.z,
+          wall_sample.terrain_height, wall_sample.elem_x_center, wall_sample.elem_z_center);
+      const WallContact contact =
+          resolve_wall_contact(wall_sample, plane_distance, pre_word, post_word, travel, work_yaw,
+                               work_pitch, work_roll);
+      if (!contact.hit) continue;
+
+      car->car_collision_latch = kCarCollisionLatchSet;
+
+      // Blend every wheel: pull it back along its travel by the blocked fraction
+      // and add the wall deflection (stateply.c loc_155A1..loc_1553F).
+      for (int w = 0; w < kCarWheelCount; ++w) {
+        const int32_t dx = current[w].x - previous[w].x;
+        const int32_t dy = current[w].y - previous[w].y;
+        const int32_t dz = current[w].z - previous[w].z;
+        int16_t corr_x = 0;
+        int16_t corr_y = 0;
+        int16_t corr_z = 0;
+        if (contact.remaining_travel != 0) {
+          corr_x = static_cast<int16_t>((dx * contact.remaining_travel) / travel);
+          corr_y = static_cast<int16_t>((dy * contact.remaining_travel) / travel);
+          corr_z = static_cast<int16_t>((dz * contact.remaining_travel) / travel);
+        }
+        current[w].x = previous[w].x + static_cast<int16_t>(corr_x + contact.deflection.x);
+        current[w].y = previous[w].y + static_cast<int16_t>(corr_y + contact.deflection.y);
+        current[w].z = previous[w].z + static_cast<int16_t>(corr_z + contact.deflection.z);
+      }
+
+      // Drain the blocked fraction of the car's speed. The reference instead
+      // sets car_36MwhlAngle and calls update_crash_state(1), which enters the
+      // crash state (slow-motion + spin) without itself zeroing the speed; that
+      // state machine is not ported yet, so we scale the speed by the surviving
+      // travel as a stand-in that keeps the car from creeping through the wall.
+      if (contact.remaining_travel <= 0) {
+        car->car_actual_speed = 0;
+        car->car_rev_speed = 0;
+      } else if (contact.remaining_travel < travel) {
+        car->car_actual_speed = static_cast<uint16_t>(
+            static_cast<uint32_t>(car->car_actual_speed) *
+            static_cast<uint32_t>(contact.remaining_travel) / static_cast<uint32_t>(travel));
+        car->car_rev_speed = static_cast<uint16_t>(
+            static_cast<uint32_t>(car->car_rev_speed) *
+            static_cast<uint32_t>(contact.remaining_travel) / static_cast<uint32_t>(travel));
+      }
+      break;  // the reference resolves a single wall per tick
     }
   }
 

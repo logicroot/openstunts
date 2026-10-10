@@ -237,7 +237,7 @@ void TrackCollision::build_track_object_from_track(const s3d::Track& track,
   sample.plane_index = 0;
   sample.wall_index = -1;
   sample.surface_type = static_cast<int8_t>(CarSurfaceType::Grass);
-  sample.wall_height = -4;
+  sample.wall_height = -12;  // seg004.asm: wallHeight = 0FFF4h
   sample.wall_lower_bound = -1000;
 
   if (!loaded_) {
@@ -306,7 +306,7 @@ void TrackCollision::build_track_object_from_track(const s3d::Track& track,
   int16_t wall_orient_mod = 0;
   int planindex = 0;
   int wallindex = -1;
-  int wall_height = -4;
+  int wall_height = -12;  // seg004.asm: wallHeight = 0FFF4h
   int wall_lower_bound = -1000;
   const int16_t phys = item == 0 ? -1 : def.phys;
 

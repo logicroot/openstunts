@@ -340,4 +340,91 @@ TEST(motion_track_collision_drives_real_track_without_sinking) {
     if (car.car_sumSurfAllWheels > 0) ++ground_ticks;
   }
   EXPECT_TRUE(ground_ticks > 200);
+  // Circling this track must sweep at least one wheel across a wall (integration
+  // check that step_car_motion reaches resolve_wall_contact). The latch is
+  // sticky, so it stays set once the wall response fires.
+  EXPECT_EQ(car.car_collision_latch, kCarCollisionLatchSet);
+}
+
+// ---------------------------------------------------------------------------
+// resolve_wall_contact (stateply.c wall block)
+//
+// A wall with orientation 0 through the origin puts the wall line on the world
+// z axis, so the rotated across-wall coordinate `c.z` equals the wheel's world
+// x. The wheel crosses the wall when its x flips sign.
+// ---------------------------------------------------------------------------
+namespace {
+
+CollisionSample flat_wall() {
+  CollisionSample s;
+  s.plane_index = 0;
+  s.wall_index = 0x65;
+  s.wall_start_x = 0;
+  s.wall_start_z = 0;
+  s.wall_orientation = 0;
+  s.wall_height = 0x2A;        // 42
+  s.wall_lower_bound = -12;
+  return s;
+}
+
+}  // namespace
+
+TEST(wall_contact_no_hit_when_both_ends_same_side) {
+  const CollisionSample wall = flat_wall();
+  const WallContact c =
+      resolve_wall_contact(wall, 0, fixed::Vec3{100, 0, 500}, fixed::Vec3{95, 0, 500}, 375, 0, 0, 0);
+  EXPECT_TRUE(!(c.hit));
+}
+
+TEST(wall_contact_no_hit_outside_height_band) {
+  const CollisionSample wall = flat_wall();
+  const fixed::Vec3 pre{3, 0, 500};
+  const fixed::Vec3 post{-2, 0, 500};
+  // plane_distance above wall_height (42) or at/below wall_lower_bound (-12).
+  EXPECT_TRUE(!(resolve_wall_contact(wall, 100, pre, post, 375, 0, 0, 0).hit));
+  EXPECT_TRUE(!(resolve_wall_contact(wall, -20, pre, post, 375, 0, 0, 0).hit));
+  EXPECT_TRUE(!(resolve_wall_contact(wall, 42, pre, post, 375, 0, 0, 0).hit));
+}
+
+TEST(wall_contact_crossing_blocks_part_of_travel) {
+  const CollisionSample wall = flat_wall();
+  const WallContact c =
+      resolve_wall_contact(wall, 0, fixed::Vec3{3, 0, 500}, fixed::Vec3{-2, 0, 500}, 375, 0, 0, 0);
+  EXPECT_TRUE(c.hit);
+  // Penetration = |post.x| << 6 = 2 * 64 = 128 long units; travel 375 survives
+  // the remainder.
+  EXPECT_EQ(c.remaining_travel, 375 - 128);
+  // The car is nudged along the wall: +768 across, +penetration along.
+  EXPECT_EQ(c.deflection.x, 768);
+  EXPECT_EQ(c.deflection.z, 128);
+}
+
+TEST(wall_contact_full_crossing_kills_travel) {
+  const CollisionSample wall = flat_wall();
+  const WallContact c =
+      resolve_wall_contact(wall, 0, fixed::Vec3{50, 0, 500}, fixed::Vec3{-50, 0, 500}, 375, 0, 0, 0);
+  EXPECT_TRUE(c.hit);
+  // The wheel jumped far past the wall line: no travel remains.
+  EXPECT_TRUE(c.remaining_travel <= 0);
+}
+
+TEST(wall_contact_swaps_endpoints_and_mirrors_slide) {
+  const CollisionSample wall = flat_wall();
+  // post is the upper end (x = +3) now, so the endpoints swap and the along-wall
+  // nudge is mirrored.
+  const WallContact c =
+      resolve_wall_contact(wall, 0, fixed::Vec3{-2, 0, 500}, fixed::Vec3{3, 0, 500}, 375, 0, 0, 0);
+  EXPECT_TRUE(c.hit);
+  EXPECT_EQ(c.remaining_travel, 375 - 128);
+  EXPECT_EQ(c.deflection.x, -768);
+  EXPECT_EQ(c.deflection.z, 128);
+}
+
+TEST(wall_contact_ignores_zero_travel_and_missing_wall) {
+  CollisionSample wall = flat_wall();
+  const fixed::Vec3 pre{3, 0, 500};
+  const fixed::Vec3 post{-2, 0, 500};
+  EXPECT_TRUE(!(resolve_wall_contact(wall, 0, pre, post, 0, 0, 0, 0).hit));
+  wall.wall_index = -1;
+  EXPECT_TRUE(!(resolve_wall_contact(wall, 0, pre, post, 375, 0, 0, 0).hit));
 }

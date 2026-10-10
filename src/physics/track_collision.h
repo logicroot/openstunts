@@ -48,7 +48,7 @@ struct CollisionSample {
   int16_t wall_start_x = 0;
   int16_t wall_start_z = 0;
   int16_t wall_orientation = 0;
-  int16_t wall_height = -4;     // 0xFFF4 default
+  int16_t wall_height = -12;    // 0xFFF4 default
   int16_t wall_lower_bound = -1000;
   int16_t physical_model = -1;
 };

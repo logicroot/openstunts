@@ -9,7 +9,9 @@
 // loaded TrackCollision is passed it instead resolves the active track plane
 // under each wheel (ramps, banked roads, elevated terrain) via
 // build_track_object / plane_signed_distance and travels along it via
-// transform_wheel_travel_to_world. Wall/loop collisions are still deferred.
+// transform_wheel_travel_to_world. Wall collisions are resolved by sweeping
+// each wheel across the active wall (resolve_wall_contact); loop/banked
+// steering is still deferred.
 
 #include <cstdint>
 #include <functional>
@@ -46,5 +48,27 @@ void step_car_motion(CarState* car, const CarSpec& spec, int frames_per_sec,
 // update_wheel_suspension). `contact_delta` is the pre-correction signed
 // distance of the wheel to the ground, in world units. Exposed for tests.
 int16_t update_wheel_suspension(CarState* car, int16_t wheel_index, int16_t contact_delta);
+
+struct CollisionSample;
+
+// Result of one swept wheel/wall test (restunts stateply.c
+// loc_15257..loc_1556F).
+struct WallContact {
+  bool hit = false;
+  // var_F4: the fraction of this tick's travel that survives the wall. The
+  // blocked distance is (travel - remaining_travel); 0 stops the wheel dead.
+  int32_t remaining_travel = 0;
+  // vec_1C: world-space nudge applied to every wheel along the wall.
+  fixed::Vec3 deflection;
+};
+
+// Resolves a wheel crossing the active wall described by `sample`.
+// `plane_distance` is the wheel's signed distance to the active plane and
+// `pre_word`/`post_word` its world-space positions before/after this tick's
+// travel; `travel` is the tick's travel and yaw/pitch/roll the car pose in
+// 1/1024-turn units. Exposed for tests.
+WallContact resolve_wall_contact(const CollisionSample& sample, int plane_distance,
+                                 const fixed::Vec3& pre_word, const fixed::Vec3& post_word,
+                                 int16_t travel, int16_t yaw, int16_t pitch, int16_t roll);
 
 }  // namespace s3d::physics
