@@ -5,6 +5,7 @@
 #include "physics/car_steering.h"
 #include "physics/fixed_math.h"
 #include "physics/wrap_math.h"
+#include "physics/track_collision.h"
 
 namespace s3d::physics {
 
@@ -123,7 +124,8 @@ int16_t update_wheel_suspension(CarState* car, int16_t wheel_index, int16_t cont
 }
 
 void step_car_motion(CarState* car, const CarSpec& spec, int frames_per_sec,
-                     const GroundSampler& ground) {
+                     const GroundSampler& ground, const TrackCollision* collision) {
+  (void)collision;
   // ---- Working pose --------------------------------------------------------
   int32_t work_x = car->car_position.x;
   int32_t work_y = car->car_position.y;
@@ -352,6 +354,11 @@ void step_car_motion(CarState* car, const CarSpec& spec, int frames_per_sec,
   car->car_rotate.x = yaw;
   car->car_rotate.y = pitch;
   car->car_rotate.z = roll;
+}
+
+void step_car_motion(CarState* car, const CarSpec& spec, int frames_per_sec,
+                     const GroundSampler& ground) {
+  step_car_motion(car, spec, frames_per_sec, ground, nullptr);
 }
 
 }  // namespace s3d::physics

@@ -17,6 +17,8 @@
 
 namespace s3d::physics {
 
+class TrackCollision;
+
 // Ground sample under a wheel. `height` is in world units (matching the 16-bit
 // "word" coordinates the renderer uses); `surface` is a kCarSurface* id.
 struct GroundSample {
@@ -35,6 +37,8 @@ using GroundSampler = std::function<GroundSample(float wx, float wz)>;
 // car_wheel_contact_positions[].
 void step_car_motion(CarState* car, const CarSpec& spec, int frames_per_sec,
                      const GroundSampler& ground);
+void step_car_motion(CarState* car, const CarSpec& spec, int frames_per_sec,
+                     const GroundSampler& ground, const TrackCollision* collision);
 
 // Per-wheel suspension spring (restunts physics_collision.c
 // update_wheel_suspension). `contact_delta` is the pre-correction signed
