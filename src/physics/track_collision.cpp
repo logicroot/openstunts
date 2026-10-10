@@ -218,6 +218,11 @@ void TrackCollision::build_track_object_from_track(const s3d::Track& track, cons
   uint8_t terrain_tile = track.terrain_at(x, z);
   int16_t terrain_height = 0;
   if (terrain_tile == 6) terrain_height = 450;
+  out->plane_index = -1;
+  // simple hill slope hint
+  if (terrain_tile >= 7 && terrain_tile <= 18) {
+    out->plane_index = 3; // flat base plane; more specific later
+  }
   out->terrain_height = terrain_height;
   out->elem_x_center = x * kTileSize + kTileSize / 2;
   out->elem_z_center = z * kTileSize + kTileSize / 2;
