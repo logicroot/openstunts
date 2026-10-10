@@ -89,11 +89,14 @@ int subst_hillroad(int terrain, int item) {
   return 0;
 }
 
-void add_ground_quad(MeshBuilder& mb, float cx, float cz, const glm::vec4& color) {
-  const glm::vec3 a(cx - kHalf, 0.0f, cz - kHalf);
-  const glm::vec3 b(cx + kHalf, 0.0f, cz + kHalf);
-  const glm::vec3 c(cx + kHalf, 0.0f, cz - kHalf);
-  const glm::vec3 d(cx - kHalf, 0.0f, cz + kHalf);
+void add_ground_quad(MeshBuilder& mb, float cx, float cz, const glm::vec4& color,
+                     float y = 0.0f) {
+  // Corners must be given in convex (non-crossing) order: the quad is split as
+  // (a,b,c) + (a,c,d), so a bowtie ordering would leave a triangular hole.
+  const glm::vec3 a(cx - kHalf, y, cz - kHalf);  // -x, -z
+  const glm::vec3 b(cx + kHalf, y, cz - kHalf);  // +x, -z
+  const glm::vec3 c(cx + kHalf, y, cz + kHalf);  // +x, +z
+  const glm::vec3 d(cx - kHalf, y, cz + kHalf);  // -x, +z
   mb.add_quad(a, b, c, d, color, glm::vec3(0.0f, 1.0f, 0.0f));
 }
 
@@ -144,6 +147,13 @@ void build_track_shape_geometry_impl(const Track& track, const ShapeLibrary& lib
           const TerrainShape& ts = terrains[t];
           const Shape3D* s = lookup(lib, ts.shape);
           const float height = (t == 6) ? kElevatedHeight : 0.0f;
+          // The terrain shapes do not all cover their full tile footprint: the
+          // diagonal slopes (gouo, terrain 11-14) are a single land triangle and
+          // the coast pieces (lakc, terrain 2-5) are a single water triangle. The
+          // original fills the remaining sea-level half with flat land, so draw
+          // that base quad first. It sits 1 unit below the flat ground so it does
+          // not z-fight with coplanar shape faces (water, ramps).
+          add_ground_quad(mb, cx, cz, ground_color, -1.0f);
           if (s != nullptr) {
             append_shape(mb, *s, fixed_model({cx, height, cz}, ts.rot_y), paint_color);
             ++local.terrain_shapes;
