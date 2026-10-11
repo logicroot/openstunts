@@ -220,6 +220,17 @@ bool DriveScene::on_enter() {
              start_finish_.col, start_finish_.row);
   }
 
+  // Walk the route graph (seg004.asm track_setup). The wrong-way / off-track
+  // penalty scan and the finish gate (field_CD) need it; without it the run
+  // cannot finish, matching the original's track setup errors.
+  if (race_.build_route(track_, start_finish_)) {
+    S3D_INFO("route: %d nodes from start (%d,%d)", race_.route.node_count(),
+             start_finish_.col, 29 - start_finish_.row);
+  } else if (start_finish_.found) {
+    S3D_WARN("route setup failed: %s",
+             world::route_error_name(race_.route.error()));
+  }
+
   if (!asset_dir_.empty() && hud_font_.load(path_join(asset_dir_, "FONTLED.FNT"))) {
     S3D_INFO("race clock font FONTLED.FNT loaded (%d rows)", hud_font_.rows());
   } else {

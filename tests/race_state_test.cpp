@@ -5,10 +5,12 @@
 
 #include "assets/trk.h"
 #include "game/race_state.h"
+#include "synthetic_track.h"
 #include "tiny_test.h"
 
 using namespace s3d;
 using namespace s3d::game;
+using namespace s3d_test;
 
 namespace {
 
@@ -107,40 +109,51 @@ TEST(race_format_matches_frame_as_string) {
 }
 
 TEST(race_state_route_gate_and_finish) {
-  const StartFinish sf = make_sf(7, 5, 0);
-  const int cx = center(7);
-  const int cz = center(5);
+  const Track t = make_loop_track();
+  const StartFinish sf = find_start_finish(t);
+  EXPECT_TRUE(sf.found);
+  EXPECT_EQ(sf.col, 3);
+  EXPECT_EQ(sf.row, 27);
+
   RaceState rs;
+  EXPECT_TRUE(rs.build_route(t, sf));
+  EXPECT_EQ(rs.route.node_count(), 8);  // the 8-cell ring
   rs.tick();
   rs.tick();
   rs.tick();
   EXPECT_EQ(rs.game_frame, 3);
   rs.penalty = 40;
 
-  // The car spawns on the start cell (route node 0): field_CD stays 0.
-  EXPECT_TRUE(!rs.update_finish(cx * 64, (cz - 210) * 64, sf));
+  // The car spawns on the start cell (route node 0): detect_penalty short
+  // circuits, so field_CD stays 0.
+  EXPECT_TRUE(!rs.update_finish(center(3) * 64, (center(27) - 210) * 64, sf));
   EXPECT_EQ(rs.field_cd, 0);
   EXPECT_TRUE(!rs.finished);
 
   // Crossing the line forward while still inside the start cell does not arm.
-  EXPECT_TRUE(!rs.update_finish(cx * 64, (cz + 10) * 64, sf));
+  EXPECT_TRUE(!rs.update_finish(center(3) * 64, (center(27) + 10) * 64, sf));
   EXPECT_EQ(rs.field_cd, 0);
 
-  // Leaving into the next cell locates a non-start route node.
-  EXPECT_TRUE(!rs.update_finish(cx * 64, (cz + 600) * 64, sf));
-  EXPECT_EQ(rs.field_2f4, 1);
+  // Drive the ring cell by cell (bottom-up rows: node 1..7 at file rows
+  // 28,28,28,27,26,26,26). Each step locates the next route node.
+  const int path[7][2] = {{3, 28}, {2, 28}, {1, 28}, {1, 27}, {1, 26}, {2, 26}, {3, 26}};
+  for (int i = 0; i < 7; ++i) {
+    EXPECT_TRUE(!rs.update_finish(center(path[i][0]) * 64, center(path[i][1]) * 64, sf));
+    EXPECT_EQ(rs.field_2f2, i + 1);
+  }
+  EXPECT_EQ(rs.field_cd, 0);
+  EXPECT_EQ(rs.penalty, 40);  // a clean lap charges no route penalty
 
-  // Returning to the start cell advances field_CD and, since the car is past
-  // the line, finishes the run and records the total.
-  EXPECT_TRUE(rs.update_finish(cx * 64, (cz + 10) * 64, sf));
+  // Back on the start cell past the line: the gate arms and the run finishes.
+  EXPECT_TRUE(rs.update_finish(center(3) * 64, 28500 * 64, sf));
   EXPECT_EQ(rs.field_cd, 1);
   EXPECT_TRUE(rs.finished);
-  EXPECT_EQ(rs.total_finish, 43);
+  EXPECT_EQ(rs.total_finish, 43);  // game_frame 3 + penalty 40
 
   // The clock freezes and no further crossing is reported.
   rs.tick();
   EXPECT_EQ(rs.game_frame, 3);
-  EXPECT_TRUE(!rs.update_finish(cx * 64, (cz + 200) * 64, sf));
+  EXPECT_TRUE(!rs.update_finish(center(3) * 64, (center(27) + 200) * 64, sf));
 
   rs.reset();
   EXPECT_TRUE(!rs.finished);
@@ -149,17 +162,60 @@ TEST(race_state_route_gate_and_finish) {
 }
 
 TEST(race_state_offtrack_penalty_keeps_node) {
-  // A cell outside the 30x30 grid returns the -2 penalty and must not disturb
-  // field_2F4 (detect_penalty loc_1792E), so a following return to the start
-  // cell still arms the finish exactly as on a clean lap.
-  const StartFinish sf = make_sf(7, 5, 0);
-  const int cx = center(7);
-  const int cz = center(5);
+  // A cell outside the 30x30 grid returns the -2 penalty, latches field_45B and
+  // must not disturb field_2F4 (state.c loc_172CB / loc_173AD); returning to the
+  // route clears the off-track state.
+  const Track t = make_loop_track();
+  const StartFinish sf = find_start_finish(t);
   RaceState rs;
-  rs.update_route(cx * 64, (cz + 600) * 64, sf);
+  EXPECT_TRUE(rs.build_route(t, sf));
+
+  // Drive to route node 1 so field_2F2/2F4 have left the start cell.
+  rs.update_route(center(3) * 64, center(28) * 64);
+  EXPECT_EQ(rs.field_2f2, 1);
   EXPECT_EQ(rs.field_2f4, 1);
-  rs.update_route(cx * 64, -40 * 64, sf);  // row 69, off the grid
-  EXPECT_EQ(rs.field_2f4, 1);
-  rs.update_finish(cx * 64, (cz + 10) * 64, sf);
-  EXPECT_EQ(rs.field_cd, 1);
+
+  // row = 29 - (car_z >> 16) is outside the grid -> the -2 penalty.
+  rs.update_route(center(3) * 64, -40 * 64);
+  EXPECT_EQ(rs.field_45b, 1);  // off track
+  EXPECT_EQ(rs.field_2f4, 1);  // node untouched
+
+  // Back on the route at the next cell: the off-track latch clears. (The tick
+  // must land on a cell other than the snapped start cell, or detect_penalty
+  // short circuits and the machine is skipped.)
+  rs.update_route(center(2) * 64, center(28) * 64);
+  EXPECT_EQ(rs.field_45b, 0);
+  EXPECT_EQ(rs.field_2f2, 2);
+}
+
+TEST(race_state_wrong_way_latch) {
+  // Jumping back to the predecessor cell makes detect_penalty report a node at
+  // distance 7; since node 3 is the predecessor of field_2F4 (= 4) the machine
+  // marks the car as driving against the route (seg001.asm loc_1736A).
+  const Track t = make_loop_track();
+  const StartFinish sf = find_start_finish(t);
+  RaceState rs;
+  EXPECT_TRUE(rs.build_route(t, sf));
+
+  // Drive forward to node 4 (file rows 28,28,28,27).
+  const int fwd[4][2] = {{3, 28}, {2, 28}, {1, 28}, {1, 27}};
+  for (int i = 0; i < 4; ++i) {
+    rs.update_route(center(fwd[i][0]) * 64, center(fwd[i][1]) * 64);
+  }
+  EXPECT_EQ(rs.field_2f2, 4);
+  EXPECT_EQ(rs.field_45b, 0);
+
+  // Teleport back one node: node 3 is at (col 1, bottom-up row 1).
+  rs.update_route(center(1) * 64, center(28) * 64);
+  EXPECT_EQ(rs.field_45b, 2);  // wrong way
+}
+
+TEST(race_state_without_route_never_finishes) {
+  // With no route graph the penalty scan cannot run, so the finish gate never
+  // opens even when the car crosses the line.
+  const StartFinish sf = make_sf(7, 5, 0);
+  RaceState rs;
+  EXPECT_TRUE(!rs.update_finish(center(7) * 64, (center(5) + 200) * 64, sf));
+  EXPECT_EQ(rs.field_cd, 0);
+  EXPECT_TRUE(!rs.finished);
 }
