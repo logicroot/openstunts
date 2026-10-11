@@ -140,6 +140,11 @@ void RaceState::reset() {
   field_45b = 0;
   field_45c = 0;
   show_penalty_counter = 0;
+  field_45d = 0;
+  field_48 = 0;
+  car_trackdata3_index = -1;
+  field_ce = 0;
+  car_vec_x = car_vec_y = car_vec_z = 0;
   start_col = start_col2;
   start_row = start_row2;
 }
@@ -338,6 +343,159 @@ void RaceState::update_route(int32_t car_x_long, int32_t car_z_long) {
     return;
   }
   apply_penalty(var_2, pen);
+}
+
+void RaceState::update_checkpoint(const Track& track, const CarPose& pose) {
+  // state.c loc_173B3..loc_17699.
+  field_45d = 0;
+  const int var_1c = field_45b;  // field_45B captured at entry (loc_17402)
+  if (field_45b == 1) return;    // off track: no arrow (loc_17810)
+  if (!route.valid()) return;
+
+  const fixed::Mat3 mat =
+      fixed::mat_rot_zxy(pose.rot_z, pose.rot_y, pose.rot_x, 1);
+  const int32_t car_x = pose.x >> 6;
+  const int32_t car_y = pose.y >> 6;
+  const int32_t car_z = pose.z >> 6;
+
+  // var_matptr * (point - car_pos); the components are 16-bit words, so the
+  // subtraction wraps exactly like the original's VECTOR arithmetic.
+  auto rotate_delta = [&](int32_t dx, int32_t dy, int32_t dz) {
+    const fixed::Vec3 v{static_cast<int16_t>(dx), static_cast<int16_t>(dy),
+                        static_cast<int16_t>(dz)};
+    fixed::Vec3 o;
+    fixed::mat_mul_vector(v, mat, &o);
+    return o;
+  };
+
+  int var_2 = 0;
+  int var_3a = 0;  // var_3A: best checkpoint index within the block
+  int best_z = 0;  // var_32.z: the nearest positive forward distance so far
+  int si = 0;
+
+  if (field_45b == 2) {
+    // Wrong way: aim at the previous node (loc_173C2 -> loc_173F0).
+    if (!pose.crashed) field_45d = 3;
+    var_2 = field_2f4;
+    goto walk_entry;
+  }
+
+  // field_45b == 0 (loc_173F6).
+  if (car_trackdata3_index != -1) {
+    if (var_1c != 0) {
+      // The wrong-way latch cleared this tick: drop the stale target
+      // (loc_17402 -> loc_17431).
+      car_trackdata3_index = -1;
+      si = 0;
+      goto at_174b3;
+    }
+    // Keep the target only while it hangs off the current node (loc_1740F).
+    if (car_trackdata3_index != field_2f2 &&
+        route.successor(field_2f2) != car_trackdata3_index &&
+        route.alternate(field_2f2) != car_trackdata3_index) {
+      car_trackdata3_index = -1;
+      si = 0;
+      goto at_174b3;
+    }
+    {
+      // loc_1743A: forward distance to the current target.
+      const int32_t dy = (car_vec_y == -1) ? 0 : (car_vec_y - car_y);
+      si = rotate_delta(car_vec_x - car_x, dy, car_vec_z - car_z).z;
+    }
+    goto at_174b3;
+  }
+  si = 0;
+
+at_174b3:
+  if (si >= 0x113) goto keep_point;             // target far ahead: keep it
+  if (car_trackdata3_index != -1) goto advance_point;
+  var_2 = field_2f2;
+
+walk_entry:
+  // loc_174C9: a fork node is not walked; keep the existing target.
+  if (route.alternate(var_2) != -1) goto keep_point;
+  {
+    // loc_174DD: scan the block, keeping the nearest point ahead of the car.
+    for (int var_2c = 0; var_2c < 64; ++var_2c) {
+      world::RouteCheckpoint cp;
+      const bool last = route.checkpoint(var_2, var_2c, track, &cp);
+      car_vec_x = static_cast<int16_t>(cp.x);
+      car_vec_y = static_cast<int16_t>(cp.y);
+      car_vec_z = static_cast<int16_t>(cp.z);
+      const int32_t dy = (cp.y == -1) ? -car_y : (cp.y - car_y);
+      const int vz = rotate_delta(cp.x - car_x, dy, cp.z - car_z).z;
+      if (var_2c == 0 || (vz < best_z && vz > 0)) {
+        var_3a = var_2c;
+        best_z = vz;
+      }
+      if (last) break;
+    }
+  }
+
+  if (field_45b == 2) {
+    // loc_175AF: the car may have straightened out; reset the wrong-way latch
+    // (loc_17631) once its heading matches the route direction again.
+    world::RouteCheckpoint p52, p1a;
+    if (var_3a != 0) {
+      route.checkpoint(var_2, var_3a - 1, track, &p52);
+      route.checkpoint(var_2, var_3a, track, &p1a);
+    } else {
+      route.checkpoint(var_2, 0, track, &p52);
+      route.checkpoint(var_2, 1, track, &p1a);
+    }
+    const int dir = fixed::polar_angle(p52.x - p1a.x, p1a.z - p52.z) & 0x3FF;
+    si = (pose.rot_x - dir) & 0x3FF;
+    if (si > 0x380 || si < 0x80) {
+      field_45b = 0;
+      field_45c = 1;
+      car_trackdata3_index = var_2;
+      field_ce = var_3a;
+    }
+    goto advance_point;  // aligned resets; otherwise step the old target
+  }
+  // loc_17640: normal driving adopts the node the penalty machine found.
+  car_trackdata3_index = field_2f2;
+  field_ce = var_3a;
+
+advance_point:
+  {
+    // loc_1764C: emit the current point, then step to the next block.
+    world::RouteCheckpoint cp;
+    const int idx = field_ce;
+    const bool last = route.checkpoint(car_trackdata3_index, idx, track, &cp);
+    field_ce = idx + 1;
+    if (car_trackdata3_index >= 0 && car_trackdata3_index < route.node_count()) {
+      car_vec_x = static_cast<int16_t>(cp.x);
+      car_vec_y = static_cast<int16_t>(cp.y);
+      car_vec_z = static_cast<int16_t>(cp.z);
+    }
+    if (!last) goto keep_point;
+    if (route.alternate(field_2f2) != -1) {
+      car_trackdata3_index = -1;
+    } else {
+      car_trackdata3_index = route.successor(field_2f2);
+    }
+    field_ce = 0;
+  }
+
+keep_point:
+  // loc_17699: turn the target point into the HUD arrow direction.
+  if (car_trackdata3_index == -1) return;
+  if (field_45b != 0) return;
+  {
+    const int32_t dy = (car_vec_y == -1) ? 0 : (car_vec_y - car_y);
+    const fixed::Vec3 v38 = rotate_delta(car_vec_x - car_x, dy, car_vec_z - car_z);
+    field_48 = fixed::polar_angle(-v38.x, v38.z) & 0x3FF;
+    if (pose.crashed) return;
+    // loc_17764 / loc_1776C / loc_1779E. field_B6 is never written by the
+    // original, so the right arrow has no suppressor.
+    const int octant = ((field_48 + 0x80) & 0x3FF) >> 8;
+    if (octant == 1) {
+      field_45d = 1;  // left
+    } else if (octant == 3) {
+      field_45d = 2;  // right
+    }
+  }
 }
 
 bool RaceState::update_finish(int32_t car_x_long, int32_t car_z_long,

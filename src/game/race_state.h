@@ -7,6 +7,9 @@
 //   * seg004.asm track_setup            route graph (world/track_route.h)
 //   * seg001.asm detect_penalty (5307)  route node location + penalty distance
 //   * state.c     loc_172CB..loc_173AD  penalty machine (field_45B/45C/2F2/2F4)
+//   * state.c     loc_173B3..loc_17699  checkpoint/arrow machine (field_45D/48,
+//                                       car_vec_unk3, car_trackdata3_index,
+//                                       field_CE, wrong-way reset)
 //   * state.c     loc_17771             field_CD finish gate
 //   * statecrs.c  loc_19730             finish: crashBmpFlag 3, total_finish
 //   * seg008.asm  format_frame_as_string / print_int_as_string_maybe
@@ -58,6 +61,20 @@ struct PenaltyProbe {
   int penalty = 0;       // var_1E distance; -1 wrapped onto node 0, -2 off track
 };
 
+// The car pose the checkpoint/arrow machine consumes (state.c player_op's
+// car_posWorld1 / car_rotate / car_crashBmpFlag). Positions are 1/64 world
+// units; angles are 0x400 units with rot_x = yaw, rot_y = pitch, rot_z = roll
+// (the original's car_rotate.x/y/z).
+struct CarPose {
+  int32_t x = 0;
+  int32_t y = 0;
+  int32_t z = 0;
+  int16_t rot_x = 0;
+  int16_t rot_y = 0;
+  int16_t rot_z = 0;
+  bool crashed = false;
+};
+
 // Clock, route and finish state for one run. The original keeps these split
 // across GAMESTATE (game_frame / game_penalty / game_total_finish), GAMESTATE's
 // playerstate (field_CD / field_2F2 / field_2F4 / field_45B / field_45C) and the
@@ -78,6 +95,15 @@ struct RaceState {
   int field_45b = 0;  // 0 normal, 1 off track (penalty -2), 2 wrong way
   int field_45c = 0;  // consecutive "wrong direction" ticks
   int show_penalty_counter = 0;  // HUD "WRONG WAY"/"OFF ROAD" banner frames
+
+  // Checkpoint/arrow machine (state.c loc_173B3..loc_17699).
+  int field_45d = 0;   // playerstate.field_45D: 0 none, 1 left, 2 right, 3 wrong way
+  int field_48 = 0;    // playerstate.field_48: angle from the car to the arrow point
+  int car_trackdata3_index = -1;  // playerstate.car_trackdata3_index
+  int field_ce = 0;    // playerstate.field_CE: step into the target block
+  int16_t car_vec_x = 0;  // playerstate.car_vec_unk3: the arrow point (world units)
+  int16_t car_vec_y = 0;  // -1 = unknown height
+  int16_t car_vec_z = 0;
 
   // game_startcol/2 and game_startrow/2: the cell the penalty scan last snapped
   // to. The car sitting on it short-circuits the scan (detect_penalty early
@@ -102,6 +128,14 @@ struct RaceState {
   // Runs detect_penalty plus the penalty machine for this tick's car position
   // (1/64 world units). No-op when the route graph is not built.
   void update_route(int32_t car_x_long, int32_t car_z_long);
+
+  // state.c loc_173B3..loc_17699: walks the checkpoint/arrow points along the
+  // route from the car, updating field_45D (the HUD arrow), field_48, the
+  // target point (car_vec_*) and the target node/step (car_trackdata3_index /
+  // field_CE). Also performs the wrong-way reset (loc_17631): once the car's
+  // heading matches the route again, field_45B clears. Call after update_route
+  // (it reads the penalty machine's field_45B / field_2F2 / field_2F4).
+  void update_checkpoint(const Track& track, const CarPose& pose);
 
   // Tests the finish line for the current car position (state.c loc_17771).
   // Returns true on the tick the car crosses it forward once the route gate

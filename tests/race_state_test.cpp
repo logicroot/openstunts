@@ -219,3 +219,56 @@ TEST(race_state_without_route_never_finishes) {
   EXPECT_EQ(rs.field_cd, 0);
   EXPECT_TRUE(!rs.finished);
 }
+
+// The checkpoint/arrow machine (state.c loc_173B3..loc_17699): it follows the
+// checkpoint points ahead of the car to pick the HUD arrow, and it clears the
+// wrong-way latch once the car is heading along the route again.
+TEST(race_checkpoint_arrow_and_wrong_way_reset) {
+  const Track t = make_loop_track();
+  const StartFinish sf = find_start_finish(t);
+  RaceState rs;
+  EXPECT_TRUE(rs.build_route(t, sf));
+
+  // The car sits on the start/finish cell heading north (+z), the route
+  // direction there.
+  CarPose pose;
+  pose.x = center(3) * 64;
+  pose.z = center(27) * 64;
+  pose.y = 0;
+  pose.rot_x = 0;
+
+  rs.update_checkpoint(t, pose);
+  EXPECT_EQ(rs.car_trackdata3_index, 0);
+  EXPECT_EQ(rs.car_vec_x, 3584);
+  EXPECT_EQ(rs.car_vec_y, -1);
+  EXPECT_EQ(rs.car_vec_z, 28288);   // node 0's first checkpoint
+  EXPECT_EQ(rs.field_ce, 1);        // it advanced one step
+  EXPECT_EQ(rs.field_45d, 0);       // straight ahead: no arrow
+
+  // Point the car sideways at the straight: the target is 90 degrees off, so
+  // the HUD arrow points right (field_48 = 0x300 -> octant 3).
+  rs.field_2f2 = 0;
+  rs.field_45b = 0;
+  rs.car_trackdata3_index = -1;
+  pose.rot_x = 0x100;
+  rs.update_checkpoint(t, pose);
+  EXPECT_EQ(rs.field_48, 0x300);
+  EXPECT_EQ(rs.field_45d, 2);
+
+  // Wrong way: the latch drives the arrow to 3 and holds while the car still
+  // points against the route.
+  rs.field_45b = 2;
+  rs.field_45c = 0;
+  rs.car_trackdata3_index = 0;
+  rs.field_ce = 1;
+  pose.rot_x = 0x200;
+  rs.update_checkpoint(t, pose);
+  EXPECT_EQ(rs.field_45b, 2);
+  EXPECT_EQ(rs.field_45d, 3);
+
+  // Heading along the route again clears the latch (loc_17631).
+  pose.rot_x = 0;
+  rs.update_checkpoint(t, pose);
+  EXPECT_EQ(rs.field_45b, 0);
+  EXPECT_EQ(rs.field_45c, 1);
+}

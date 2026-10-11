@@ -328,6 +328,19 @@ void DriveScene::physics_tick(const Controls& controls) {
     car_.car_crashBmpFlag = 3;
     S3D_INFO("finish: %s", game::format_race_time(race_.total_finish, 20, true).c_str());
   }
+
+  // Checkpoint/arrow machine (state.c loc_173B3..loc_17699): tracks the
+  // checkpoint points ahead of the car to drive the HUD arrow (field_45D) and
+  // to clear the wrong-way latch once the car is heading the right way again.
+  game::CarPose pose;
+  pose.x = car_.car_position.x;
+  pose.y = car_.car_position.y;
+  pose.z = car_.car_position.z;
+  pose.rot_x = car_.car_rotate.x;  // yaw
+  pose.rot_y = car_.car_rotate.y;  // pitch
+  pose.rot_z = car_.car_rotate.z;  // roll
+  pose.crashed = car_.car_crashBmpFlag != 0;
+  race_.update_checkpoint(track_, pose);
 }
 
 void DriveScene::update_camera() {
