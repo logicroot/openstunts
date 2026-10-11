@@ -140,6 +140,7 @@ void RaceState::reset() {
   field_45b = 0;
   field_45c = 0;
   show_penalty_counter = 0;
+  penalty_time = 0;
   field_45d = 0;
   field_48 = 0;
   car_trackdata3_index = -1;
@@ -159,7 +160,8 @@ void RaceState::apply_penalty(int node, int pen) {
   field_2f2 = node;
   field_45c = 0;
   if (pen > 0) {
-    penalty += pen * kRaceFrameRate * 3;
+    penalty_time = pen * kRaceFrameRate * 3;
+    penalty += penalty_time;
     show_penalty_counter = kRaceFrameRate << 2;
   }
   field_2f4 = node;

@@ -54,6 +54,39 @@ glm::vec4 palette_color(const Palette& p, int index) {
                    static_cast<float>(c[2]) / 255.0f, 1.0f);
 }
 
+// Appends one solid axis-aligned quad (two triangles) to the HUD vertices.
+void append_quad(std::vector<Vertex>& out, float x, float y, float w, float h,
+                 const glm::vec4& color) {
+  Vertex v;
+  v.normal = glm::vec3(0.0f, 0.0f, 1.0f);
+  v.color = color;
+  const float sx = x + w;
+  const float sy = y + h;
+  const glm::vec3 pts[6] = {{x, y, 0.0f},  {sx, y, 0.0f},  {sx, sy, 0.0f},
+                            {x, y, 0.0f},  {sx, sy, 0.0f}, {x, sy, 0.0f}};
+  for (const glm::vec3& p : pts) {
+    v.position = p;
+    out.push_back(v);
+  }
+}
+
+// Draws a 2D sprite as one `scale`x`scale` quad per opaque pixel. Index 0xFF
+// (and any other non-palette value) is the transparent colour key
+// (seg012.asm sprite_putimage_transparent via the `incnums` table).
+void append_sprite(std::vector<Vertex>& out, const Sprite2D& s, const Palette& pal,
+                   float x, float y, float scale) {
+  if (!s.valid()) return;
+  for (int py = 0; py < s.height; ++py) {
+    for (int px = 0; px < s.width; ++px) {
+      const uint8_t idx = s.pixels[static_cast<size_t>(py) * s.width + px];
+      if (idx >= 16) continue;
+      append_quad(out, x + static_cast<float>(px) * scale,
+                  y + static_cast<float>(py) * scale, scale, scale,
+                  palette_color(pal, idx));
+    }
+  }
+}
+
 void aim_at(Camera& cam, const glm::vec3& target) {
   const glm::vec3 d = glm::normalize(target - cam.position);
   cam.yaw_deg = glm::degrees(std::atan2(d.z, d.x));
@@ -235,6 +268,23 @@ bool DriveScene::on_enter() {
     S3D_INFO("race clock font FONTLED.FNT loaded (%d rows)", hud_font_.rows());
   } else {
     S3D_WARN("FONTLED.FNT not found; the race clock HUD is disabled");
+  }
+  // The warning banner and the direction arrows (seg003.asm draw_ingame_text).
+  // The in-game text uses FONTDEF.FNT (frame.c font_set_fontdef); the arrows are
+  // the SDGAME2.PVS "left"/"righ" sprites at screen centre.
+  if (!asset_dir_.empty()) {
+    if (text_font_.load(path_join(asset_dir_, "FONTDEF.FNT"))) {
+      S3D_INFO("banner font FONTDEF.FNT loaded (%d rows)", text_font_.rows());
+    } else {
+      S3D_WARN("FONTDEF.FNT not found; the warning banner is disabled");
+    }
+    const std::string sprites = path_join(asset_dir_, "SDGAME2.PVS");
+    if (load_sprite2d(sprites, "left", &arrow_left_) &&
+        load_sprite2d(sprites, "righ", &arrow_right_)) {
+      S3D_INFO("direction arrows loaded (%dx%d)", arrow_left_.width, arrow_left_.height);
+    } else {
+      S3D_WARN("SDGAME2.PVS arrows not found; the direction arrow is disabled");
+    }
   }
   if (!hud_.init()) S3D_WARN("HUD renderer initialization failed");
   hud_fg_ = have_palette ? palette_color(palette_, 15) : glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
@@ -435,19 +485,59 @@ glm::mat4 DriveScene::car_model_matrix(float alpha) const {
 }
 
 void DriveScene::build_hud(std::vector<Vertex>& verts, int width, int height) const {
-  if (!hud_font_.valid()) return;
+  const int scale = std::max(1, height / 200);
+
   // The original draws the elapsed time with FONTLED at x=0x8C (320-wide screen)
   // and y=roofbmpheight+2; here it sits at the top centre and scales with the
   // window. intro_draw_text draws a black copy offset by one pixel first.
-  const int scale = std::max(1, height / 200);
-  // Chase-cam HUD shows MM:SS (format_frame_as_string with the hundredths flag
-  // clear); the hundredths form belongs to the finished-time/evaluation screen.
-  const std::string time_str = game::format_race_time(race_.game_frame, 20, false);
-  const float text_w = static_cast<float>(hud_font_.text_width(time_str)) * scale;
-  const float x = (static_cast<float>(width) - text_w) * 0.5f;
-  const float y = 4.0f * scale;
-  append_text(verts, hud_font_, time_str, x + scale, y + scale, scale, hud_shadow_);
-  append_text(verts, hud_font_, time_str, x, y, scale, hud_fg_);
+  if (hud_font_.valid()) {
+    // Chase-cam HUD shows MM:SS (format_frame_as_string with the hundredths flag
+    // clear); the hundredths form belongs to the finished-time/evaluation screen.
+    const std::string time_str = game::format_race_time(race_.game_frame, 20, false);
+    const float text_w = static_cast<float>(hud_font_.text_width(time_str)) * scale;
+    const float x = (static_cast<float>(width) - text_w) * 0.5f;
+    const float y = 4.0f * scale;
+    append_text(verts, hud_font_, time_str, x + scale, y + scale, scale, hud_shadow_);
+    append_text(verts, hud_font_, time_str, x, y, scale, hud_fg_);
+  }
+
+  const float cx = static_cast<float>(width) * 0.5f;
+  const float cy = static_cast<float>(height) * 0.5f;
+
+  // Direction arrow / wrong-way warning (seg003.asm draw_ingame_text loc_1D2DC):
+  // field_45D 1 = "left" arrow, 2 = "righ" arrow, 3 = "Wrong Way", 0 = none. The
+  // original gates this on cameramode 0, no opponent follow and no crash; only
+  // the crash flag exists in this port. field_45E (opponent near) is deferred.
+  if (car_.car_crashBmpFlag == 0) {
+    const Sprite2D* arrow = nullptr;
+    if (race_.field_45d == 1) arrow = &arrow_left_;
+    if (race_.field_45d == 2) arrow = &arrow_right_;
+    if (arrow != nullptr && arrow->valid()) {
+      append_sprite(verts, *arrow, palette_,
+                    cx - static_cast<float>(arrow->width) * scale * 0.5f,
+                    cy - static_cast<float>(arrow->height) * scale * 0.5f, scale);
+    } else if (race_.field_45d == 3 && text_font_.valid()) {
+      const std::string msg = "Wrong Way";
+      const float w = static_cast<float>(text_font_.text_width(msg)) * scale;
+      const float y = cy - static_cast<float>(text_font_.rows()) * scale * 0.5f;
+      const float x = cx - w * 0.5f;
+      append_text(verts, text_font_, msg, x + scale, y + scale, scale, hud_shadow_);
+      append_text(verts, text_font_, msg, x, y, scale, hud_fg_);
+    }
+  }
+
+  // Penalty banner (seg003.asm loc_1D42C): "pen" plus the last penalty's time,
+  // shown while show_penalty_counter counts down. Sits just below centre so it
+  // does not cover the arrow.
+  if (race_.show_penalty_counter > 0 && text_font_.valid()) {
+    const std::string msg =
+        "pen" + game::format_race_time(race_.penalty_time, 20, false);
+    const float w = static_cast<float>(text_font_.text_width(msg)) * scale;
+    const float x = cx - w * 0.5f;
+    const float y = cy + static_cast<float>(3 * scale);
+    append_text(verts, text_font_, msg, x + scale, y + scale, scale, hud_shadow_);
+    append_text(verts, text_font_, msg, x, y, scale, hud_fg_);
+  }
 }
 
 void DriveScene::render(Renderer& renderer, int width, int height) {

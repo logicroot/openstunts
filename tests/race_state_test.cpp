@@ -188,6 +188,35 @@ TEST(race_state_offtrack_penalty_keeps_node) {
   EXPECT_EQ(rs.field_2f2, 2);
 }
 
+TEST(race_state_penalty_sets_banner_time) {
+  // A lagging route locator (field_2F2 behind field_2F4, e.g. the car outrunning
+  // the cell scan) makes detect_penalty report a node more than three steps
+  // ahead while the car still advances along the route (td01[field_2F4] == var_2).
+  // Three such ticks trip the penalty (state.c loc_17349..loc_1737B), which arms
+  // the HUD banner and records the penalty length.
+  const Track t = make_loop_track();
+  const StartFinish sf = find_start_finish(t);
+  RaceState rs;
+  EXPECT_TRUE(rs.build_route(t, sf));
+
+  rs.field_2f2 = 0;  // locator left behind at the start node
+  rs.field_2f4 = 4;  // while the car is really on node 4
+  rs.update_route(center(1) * 64, center(26) * 64);  // -> node 5
+  EXPECT_EQ(rs.field_45c, 1);
+  rs.update_route(center(2) * 64, center(26) * 64);  // -> node 6
+  EXPECT_EQ(rs.field_45c, 2);
+  rs.update_route(center(3) * 64, center(26) * 64);  // -> node 7: penalty
+  // penalty_time = pen * framespersec * 3 = 6 * 20 * 3 = 360 frames.
+  EXPECT_EQ(rs.penalty_time, 360);
+  EXPECT_EQ(rs.penalty, 360);
+  EXPECT_EQ(rs.show_penalty_counter, kRaceFrameRate << 2);
+  EXPECT_EQ(rs.field_2f2, 7);
+
+  // The banner counts down one frame per tick.
+  rs.tick();
+  EXPECT_EQ(rs.show_penalty_counter, (kRaceFrameRate << 2) - 1);
+}
+
 TEST(race_state_wrong_way_latch) {
   // Jumping back to the predecessor cell makes detect_penalty report a node at
   // distance 7; since node 3 is the predecessor of field_2F4 (= 4) the machine

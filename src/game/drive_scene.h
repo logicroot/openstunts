@@ -10,6 +10,7 @@
 #include "assets/car.h"
 #include "assets/font.h"
 #include "assets/palette.h"
+#include "assets/sprite2d.h"
 #include "assets/trk.h"
 #include "game/race_state.h"
 #include "game/scene.h"
@@ -75,7 +76,10 @@ class DriveScene : public Scene {
   // Race loop: start/finish line, 20 Hz clock and the finish state.
   game::StartFinish start_finish_;
   game::RaceState race_;
-  BitmapFont hud_font_;
+  BitmapFont hud_font_;   // FONTLED.FNT, the LED race-clock font
+  BitmapFont text_font_;  // FONTDEF.FNT, the in-game banner/warning font
+  Sprite2D arrow_left_;   // SDGAME2.PVS "left"
+  Sprite2D arrow_right_;  // SDGAME2.PVS "righ"
   HudRenderer hud_;
   glm::vec4 hud_fg_{1.0f, 1.0f, 1.0f, 1.0f};      // palette index 15
   glm::vec4 hud_shadow_{0.0f, 0.0f, 0.0f, 1.0f};  // palette index 0

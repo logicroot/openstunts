@@ -86,6 +86,7 @@ struct RaceState {
 
   int game_frame = 0;    // 20 Hz frames since the run started
   int penalty = 0;       // game_penalty, in frames (route penalties)
+  int penalty_time = 0;  // the most recent penalty's length, in frames (HUD banner)
   bool finished = false;
   int total_finish = 0;  // game_total_finish, in frames
 
@@ -94,7 +95,7 @@ struct RaceState {
   int field_2f4 = 0;  // previous located node
   int field_45b = 0;  // 0 normal, 1 off track (penalty -2), 2 wrong way
   int field_45c = 0;  // consecutive "wrong direction" ticks
-  int show_penalty_counter = 0;  // HUD "WRONG WAY"/"OFF ROAD" banner frames
+  int show_penalty_counter = 0;  // penalty-banner frames (state.c loc_1737B)
 
   // Checkpoint/arrow machine (state.c loc_173B3..loc_17699).
   int field_45d = 0;   // playerstate.field_45D: 0 none, 1 left, 2 right, 3 wrong way
