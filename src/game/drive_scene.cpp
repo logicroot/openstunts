@@ -46,6 +46,14 @@ constexpr float kAngleToRadians = 6.28318530718f / 1024.0f;
 
 constexpr glm::vec4 kPlayerCarColor(0.85f, 0.60f, 0.10f, 1.0f);
 
+// 8-bit RGB for a VGA palette index (the original draws HUD text with the
+// palette indices 15 = white and 0 = black drop shadow).
+glm::vec4 palette_color(const Palette& p, int index) {
+  const uint8_t* c = p.rgb8[index & 0xFF];
+  return glm::vec4(static_cast<float>(c[0]) / 255.0f, static_cast<float>(c[1]) / 255.0f,
+                   static_cast<float>(c[2]) / 255.0f, 1.0f);
+}
+
 void aim_at(Camera& cam, const glm::vec3& target) {
   const glm::vec3 d = glm::normalize(target - cam.position);
   cam.yaw_deg = glm::degrees(std::atan2(d.z, d.x));
@@ -133,8 +141,9 @@ bool DriveScene::on_enter() {
     lib.load_p3s(path_join(asset_dir_, "GAME1.P3S"));
     lib.load_p3s(path_join(asset_dir_, "GAME2.P3S"));
   }
+  bool have_palette = false;
   if (!lib.shapes().empty()) {
-    const bool have_palette =
+    have_palette =
         !asset_dir_.empty() && load_vga_palette(path_join(asset_dir_, "SDMAIN.PVS"), &palette_);
     if (!have_palette) {
       S3D_WARN("SDMAIN.PVS palette not found; using fallback track colours");
@@ -200,6 +209,26 @@ bool DriveScene::on_enter() {
     S3D_WARN("GAME.PRE not found; using the flat 2D ground sampler");
   }
 
+  // ---- Race setup ----------------------------------------------------------
+  // Resolve the start/finish line from the track's element grid (seg004.asm)
+  // and load the LED font used for the on-screen race clock.
+  start_finish_ = game::find_start_finish(track_);
+  if (!start_finish_.found) {
+    S3D_WARN("no start/finish element in the track; using the default spawn");
+  } else if (start_finish_.multiple) {
+    S3D_WARN("multiple start/finish elements; using the first at (%d,%d)",
+             start_finish_.col, start_finish_.row);
+  }
+
+  if (!asset_dir_.empty() && hud_font_.load(path_join(asset_dir_, "FONTLED.FNT"))) {
+    S3D_INFO("race clock font FONTLED.FNT loaded (%d rows)", hud_font_.rows());
+  } else {
+    S3D_WARN("FONTLED.FNT not found; the race clock HUD is disabled");
+  }
+  if (!hud_.init()) S3D_WARN("HUD renderer initialization failed");
+  hud_fg_ = have_palette ? palette_color(palette_, 15) : glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
+  hud_shadow_ = have_palette ? palette_color(palette_, 0) : glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+
   reset_car();
   S3D_INFO("drive scene ready");
   return true;
@@ -216,23 +245,42 @@ void DriveScene::reset_car() {
   car_.car_sumSurfRearWheels = 1;
   car_.car_sumSurfAllWheels = 1;
 
-  // Spawn at the start/finish cell (7,5), facing +Z (yaw 0). The physics pivot
-  // rests six world units above the ground (all four wheel bottoms sit on the
-  // contact plane), matching the reference pose.
-  const int start_x = 7;
-  const int start_y = 5;
-  const physics::GroundSample g =
-      ground_sample(track_, world::cell_center_x(start_x), world::cell_center_z(start_y));
-  const int64_t long_scale = 64;
-  car_.car_position.x = static_cast<int32_t>(world::cell_center_x(start_x)) * long_scale;
-  car_.car_position.z = static_cast<int32_t>(world::cell_center_z(start_y)) * long_scale;
-  car_.car_position.y = static_cast<int32_t>(g.height + kCarBodyDrop) * long_scale;
+  // Spawn on the start/finish line, matching init_game_state (restunts.c): the
+  // car sits 210 + 36 world units behind the line along the track direction and
+  // faces -track_angle. The physics pivot rests kCarBodyDrop above the ground.
+  int spawn_x = static_cast<int>(world::cell_center_x(7));
+  int spawn_z = static_cast<int>(world::cell_center_z(5));
   car_.car_rotate.x = 0;  // yaw
   car_.car_rotate.y = 0;  // pitch
   car_.car_rotate.z = 0;  // roll
+  if (start_finish_.found) {
+    const int angle = start_finish_.angle;
+    const auto sin_fast = [](int a) { return fixed::sin_fast(static_cast<unsigned short>(a)); };
+    const auto cos_fast = [](int a) { return fixed::cos_fast(static_cast<unsigned short>(a)); };
+    const int tmpcol =
+        fixed::multiply_and_scale(sin_fast(angle + 0x200), 210) +
+        fixed::multiply_and_scale(sin_fast(angle + 0x100), 36);
+    const int tmprow =
+        fixed::multiply_and_scale(cos_fast(angle + 0x200), 210) +
+        fixed::multiply_and_scale(cos_fast(angle + 0x100), 36);
+    spawn_x = static_cast<int>(world::cell_center_x(start_finish_.col)) + tmpcol;
+    spawn_z = static_cast<int>(world::cell_center_z(start_finish_.row)) + tmprow;
+    car_.car_rotate.x = physics::wrap_negate(static_cast<int16_t>(angle));
+  }
+
+  const physics::GroundSample g =
+      ground_sample(track_, static_cast<float>(spawn_x), static_cast<float>(spawn_z));
+  car_.car_position.x = spawn_x * 64;
+  car_.car_position.z = spawn_z * 64;
+  car_.car_position.y = (g.height + kCarBodyDrop) * 64;
   car_.car_previous_position = car_.car_position;
   display_prev_ = car_;
   accumulator_ = 0.0;
+
+  // The reference resets the race clock (game_frame) and finish state at race
+  // setup; "R" restarts the run the same way.
+  game_frame_ = 0;
+  race_.reset();
 
   // Snap the camera behind the car so the first frame is already framed.
   const glm::vec3 car_pos = car_world_position(0.0f);
@@ -241,7 +289,9 @@ void DriveScene::reset_car() {
 }
 
 void DriveScene::physics_tick(const Controls& controls) {
-  ++game_frame_;  // drives the animated track objects (windmill, sign, ...)
+  ++game_frame_;      // drives the animated track objects (windmill, sign, ...)
+  race_.tick();       // 20 Hz race clock (restunts state.game_frame)
+
   uint8_t input_flags = physics::kInputNone;
   if (controls.throttle > 0.05f) input_flags |= physics::kInputAccelerate;
   if (controls.throttle < -0.05f) input_flags |= physics::kInputBrake;
@@ -257,6 +307,13 @@ void DriveScene::physics_tick(const Controls& controls) {
   physics::update_grip(&car_, spec_);
   const auto sampler = [this](float wx, float wz) { return ground_sample(track_, wx, wz); };
   physics::step_car_motion(&car_, spec_, physics::kGameFrameRateNormal, sampler, &collision_);
+
+  // Finish-line test (state.c loc_17771): on the forward crossing the original
+  // sets car_crashBmpFlag = 3 and records the total finish time.
+  if (race_.update_finish(car_.car_position.x, car_.car_position.z, start_finish_)) {
+    car_.car_crashBmpFlag = 3;
+    S3D_INFO("finish: %s", game::format_race_time(race_.total_finish, 20, true).c_str());
+  }
 }
 
 void DriveScene::update_camera() {
@@ -345,6 +402,22 @@ glm::mat4 DriveScene::car_model_matrix(float alpha) const {
   return model;
 }
 
+void DriveScene::build_hud(std::vector<Vertex>& verts, int width, int height) const {
+  if (!hud_font_.valid()) return;
+  // The original draws the elapsed time with FONTLED at x=0x8C (320-wide screen)
+  // and y=roofbmpheight+2; here it sits at the top centre and scales with the
+  // window. intro_draw_text draws a black copy offset by one pixel first.
+  const int scale = std::max(1, height / 200);
+  // Chase-cam HUD shows MM:SS (format_frame_as_string with the hundredths flag
+  // clear); the hundredths form belongs to the finished-time/evaluation screen.
+  const std::string time_str = game::format_race_time(race_.game_frame, 20, false);
+  const float text_w = static_cast<float>(hud_font_.text_width(time_str)) * scale;
+  const float x = (static_cast<float>(width) - text_w) * 0.5f;
+  const float y = 4.0f * scale;
+  append_text(verts, hud_font_, time_str, x + scale, y + scale, scale, hud_shadow_);
+  append_text(verts, hud_font_, time_str, x, y, scale, hud_fg_);
+}
+
 void DriveScene::render(Renderer& renderer, int width, int height) {
   renderer.draw_world(track_mesh_, camera_);
 
@@ -355,6 +428,10 @@ void DriveScene::render(Renderer& renderer, int width, int height) {
   if (!car_mesh_.empty()) {
     renderer.draw_world(car_mesh_, camera_, car_model_matrix(render_alpha()));
   }
+
+  std::vector<Vertex> hud;
+  build_hud(hud, width, height);
+  hud_.draw(hud, width, height);
 
   ++frame_index_;
   if (!screenshot_path_.empty() && frame_index_ >= screenshot_frame_) {

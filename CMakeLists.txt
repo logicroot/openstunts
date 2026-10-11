@@ -28,6 +28,7 @@ add_library(stunts3d_core STATIC
   src/render/renderer.cpp
   src/render/screenshot.cpp
   src/render/texture.cpp
+  src/render/hud.cpp
   src/platform/window.cpp
   src/platform/input.cpp
   src/assets/binary_reader.cpp
@@ -37,6 +38,7 @@ add_library(stunts3d_core STATIC
   src/assets/compression.cpp
   src/assets/shape3d.cpp
   src/assets/palette.cpp
+  src/assets/font.cpp
   src/physics/fixed_math.cpp
   src/physics/car_engine.cpp
   src/physics/car_steering.cpp
@@ -54,6 +56,7 @@ add_library(stunts3d_core STATIC
   src/game/application.cpp
   src/game/debug_track_scene.cpp
   src/game/drive_scene.cpp
+  src/game/race_state.cpp
 )
 target_include_directories(stunts3d_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src

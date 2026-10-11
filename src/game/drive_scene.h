@@ -8,12 +8,15 @@
 #include <glm/glm.hpp>
 
 #include "assets/car.h"
+#include "assets/font.h"
 #include "assets/palette.h"
 #include "assets/trk.h"
+#include "game/race_state.h"
 #include "game/scene.h"
 #include "physics/car_state.h"
 #include "physics/track_collision.h"
 #include "render/camera.h"
+#include "render/hud.h"
 #include "render/mesh.h"
 #include "world/track_shapes.h"
 
@@ -36,6 +39,9 @@ class DriveScene : public Scene {
   void reset_car();
   void physics_tick(const Controls& controls);
   void update_camera();
+
+  // Builds the on-screen HUD quads (race clock) in pixel coordinates.
+  void build_hud(std::vector<Vertex>& verts, int width, int height) const;
 
   // Interpolated visual pose for the current render frame.
   float render_alpha() const;
@@ -64,6 +70,14 @@ class DriveScene : public Scene {
 
   Mesh car_mesh_;
   Camera camera_;
+
+  // Race loop: start/finish line, 20 Hz clock and the finish state.
+  game::StartFinish start_finish_;
+  game::RaceState race_;
+  BitmapFont hud_font_;
+  HudRenderer hud_;
+  glm::vec4 hud_fg_{1.0f, 1.0f, 1.0f, 1.0f};      // palette index 15
+  glm::vec4 hud_shadow_{0.0f, 0.0f, 0.0f, 1.0f};  // palette index 0
 
   std::string screenshot_path_;
   int screenshot_frame_ = 0;

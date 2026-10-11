@@ -15,6 +15,8 @@ add_executable(s3d_tests
   car_steering_test.cpp
   car_motion_test.cpp
   track_collision_test.cpp
+  font_test.cpp
+  race_state_test.cpp
 )
 target_link_libraries(s3d_tests PRIVATE stunts3d_core)
 target_include_directories(s3d_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
