@@ -113,6 +113,15 @@ const RouteBlockDef& block(uint8_t elem, int sub) {
   return kRouteBlocks[kRouteElementBlockOffset[elem] + sub];
 }
 
+// Absolute dseg byte offset -> the signed 16-bit camera-data words it points at
+// (seg001.asm sub_18D60's es:[bx+si] reads).
+const int16_t* camera_data(uint16_t offset) {
+  return &kCameraData[(offset - kCameraDataBase) / 2];
+}
+
+// Cell height bump sub_18D60 adds on terrain type 6 (hillHeightConsts[1]).
+constexpr int kElevatedHeight = 450;
+
 }  // namespace
 
 bool TrackRoute::build(const Track& track, int start_col, int start_row,
@@ -337,6 +346,87 @@ bool TrackRoute::build(const Track& track, int start_col, int start_row,
   node_count_ = counter;
   built_ = true;
   return true;
+}
+
+bool TrackRoute::checkpoint(int node, int index, const Track& track,
+                            RouteCheckpoint* out) const {
+  if (node < 0 || node >= node_count_ || out == nullptr) return false;
+  const RouteNode& n = nodes_[static_cast<size_t>(node)];
+  const RouteBlockDef& b = block(n.elem, n.sub_block);
+  const int arrow_type = b.arrow_type;
+  if (arrow_type <= 0 || index < 0 || index >= arrow_type) return false;
+
+  // trackdata18 = (connStatus << 4) | subTOI; the entry side counts up from the
+  // block's first point, the exit side counts back from its last.
+  const int step = (n.conn_status == 0) ? index * 2 : (arrow_type - index) * 2 - 2;
+
+  // A block entered through its exit point normally reads its camera-data pair
+  // back-to-front; a nonzero si_opp1:si_opp2 pointer overrides the table
+  // entirely (var_24).
+  const int16_t* base;
+  bool swap = false;
+  int opp1 = 0;
+  if (n.conn_status != 0 && b.opp1_word != 0) {
+    base = camera_data(b.opp1_word);
+    opp1 = 1;
+  } else {
+    base = camera_data(b.camera_offset);
+    swap = (n.conn_status != 0);
+  }
+
+  const int16_t* p = base + step * 3;   // 6*step bytes == 3*step words
+  int ax = p[0], ay = p[1], az = p[2];
+  int bx = p[3], by = p[4], bz = p[5];
+  if (swap) {
+    int t;
+    t = ax; ax = bx; bx = t;
+    t = ay; ay = by; by = t;
+    t = az; az = bz; bz = t;
+  }
+
+  // si_arrowOrient rotates the local points in the cell's XZ plane.
+  const auto rotate = [orient = b.arrow_orient](int& x, int& z) {
+    int nx, nz;
+    switch (orient) {
+      case 0x100: nx = z; nz = -x; break;
+      case 0x200: nx = -x; nz = -z; break;
+      case 0x300: nx = -z; nz = x; break;
+      default: return;
+    }
+    x = nx;
+    z = nz;
+  };
+  rotate(ax, az);
+  rotate(bx, bz);
+
+  // Elevated terrain lifts both points by hillHeightConsts[1].
+  if (ay != -1 && track.terrain_at(n.col, kGrid - 1 - n.row) == 6) {
+    ay += kElevatedHeight;
+    by += kElevatedHeight;
+  }
+
+  // Cell position: the center of the node's cell, or the far corner when the
+  // element's ss_multiTileFlag covers more than one square.
+  const int multi = kRouteElementMultiTile[n.elem];
+  const int file_row = kGrid - 1 - n.row;          // 0 = top row
+  const int row_off = (multi & 1) ? file_row * 1024 : file_row * 1024 + 512;
+  const int col_off = (multi & 2) ? (n.col + 1) * 1024 : n.col * 1024 + 512;
+  az += row_off;
+  bz += row_off;
+  ax += col_off;
+  bx += col_off;
+
+  out->x = (ax + bx) >> 1;
+  out->y = (ay == -1) ? -1 : (ay + by) >> 1;
+  out->z = (az + bz) >> 1;
+  out->ax = ax;
+  out->ay = ay;
+  out->az = az;
+  out->bx = bx;
+  out->by = by;
+  out->bz = bz;
+  out->opp1 = opp1;
+  return index == arrow_type - 1;
 }
 
 }  // namespace s3d::world

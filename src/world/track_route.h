@@ -50,6 +50,19 @@ struct RouteNode {
   uint8_t conn_status = 0; // 0 = entered via entryPoint, 1 = via exitPoint
 };
 
+// One checkpoint/arrow point along a route node's TRKOBJINFO block
+// (seg001.asm sub_18D60). `x`/`y`/`z` is the midpoint handed back to the
+// caller (the original's car_vec_unk3); `ax`/`ay`/`az` and `bx`/`by`/`bz` are
+// the two raw camera-data points it averages; `opp1` is the var_24 flag
+// (nonzero when the block's si_opp1:si_opp2 pointer supplied the data). A y of
+// -1 means "unknown height" (the original's 0xFFFF sentinel).
+struct RouteCheckpoint {
+  int x = 0, y = 0, z = 0;
+  int ax = 0, ay = 0, az = 0;
+  int bx = 0, by = 0, bz = 0;
+  int opp1 = 0;
+};
+
 class TrackRoute {
  public:
   // Walks the track starting on the start/finish cell. `start_col` and
@@ -75,6 +88,14 @@ class TrackRoute {
     return td02_[static_cast<size_t>(node)];
   }
   const RouteNode& node(int i) const { return nodes_[static_cast<size_t>(i)]; }
+
+  // seg001.asm sub_18D60: the checkpoint/arrow point `index` steps into the
+  // TRKOBJINFO block of route `node`. Returns false once `index` reaches the
+  // block's final point (the original returns 1 at `arrowType - 1`). The
+  // height of a point is lifted by the elevated-terrain constant (450) when the
+  // cell's terrain is type 6 and the point carries a real height. `track` is
+  // needed only for that terrain lookup.
+  bool checkpoint(int node, int index, const Track& track, RouteCheckpoint* out) const;
 
   int start_col() const { return start_col_; }
   int start_row() const { return start_row_; }

@@ -102,3 +102,62 @@ TEST(track_route_default_track_matches_reference) {
   EXPECT_EQ(route.node(127).row, 26);
   EXPECT_TRUE(route.alternate(9) >= 0);  // node 9 forks onto the spur
 }
+
+// The checkpoint/arrow walk (seg001.asm sub_18D60): every route node's
+// TRKOBJINFO block yields a short run of points that curve through the element,
+// offset from the cell centre and rotated by the block's si_arrowOrient.
+TEST(track_route_checkpoint_walks_the_loop) {
+  const Track track = make_loop_track();
+  TrackRoute route;
+  EXPECT_TRUE(route.build(track, 3, 2, 0x000));
+
+  RouteCheckpoint cp;
+
+  // Start/finish straight (element 1): two points straddling the cell centre,
+  // stepping north. The run returns false until its final point.
+  EXPECT_TRUE(!route.checkpoint(0, 0, track, &cp));
+  EXPECT_EQ(cp.x, 3584);
+  EXPECT_EQ(cp.y, -1);
+  EXPECT_EQ(cp.z, 28288);
+  EXPECT_EQ(cp.ax, 3464);
+  EXPECT_EQ(cp.bx, 3704);
+  EXPECT_EQ(cp.opp1, 0);
+  EXPECT_TRUE(route.checkpoint(0, 1, track, &cp));
+  EXPECT_EQ(cp.z, 28494);
+
+  // The west straight (element 5) runs east -> west: 2894 then 2226, on the
+  // cell-centre z.
+  EXPECT_TRUE(!route.checkpoint(2, 0, track, &cp));
+  EXPECT_EQ(cp.x, 2894);
+  EXPECT_EQ(cp.z, 29184);
+  EXPECT_TRUE(route.checkpoint(2, 1, track, &cp));
+  EXPECT_EQ(cp.x, 2226);
+
+  // Out-of-range or invalid requests are rejected.
+  EXPECT_TRUE(!route.checkpoint(0, 2, track, &cp));           // element 1 has 2 points
+  EXPECT_TRUE(!route.checkpoint(0, -1, track, &cp));
+  EXPECT_TRUE(!route.checkpoint(-1, 0, track, &cp));
+  EXPECT_TRUE(!route.checkpoint(route.node_count(), 0, track, &cp));
+}
+
+// Regression over the shipped DEFAULT.TRK: the first checkpoint on the
+// start/finish cell and the second beyond it.
+TEST(track_route_checkpoint_default_track) {
+  const std::string dir = find_asset_dir();
+  if (dir.empty()) {
+    std::printf("  (skipped: no Stunts asset dir found)\n");
+    return;
+  }
+  const Track track = Track::load(path_join(dir, "DEFAULT.TRK"));
+  const StartFinish sf = find_start_finish(track);
+  TrackRoute route;
+  EXPECT_TRUE(route.build(track, sf.col, Track::kSize - 1 - sf.row, sf.angle));
+
+  RouteCheckpoint cp;
+  EXPECT_TRUE(!route.checkpoint(0, 0, track, &cp));
+  EXPECT_EQ(cp.x, 7680);   // start/finish cell centre
+  EXPECT_EQ(cp.y, -1);
+  EXPECT_EQ(cp.z, 5760);
+  EXPECT_TRUE(route.checkpoint(0, 1, track, &cp));
+  EXPECT_EQ(cp.z, 5966);
+}
