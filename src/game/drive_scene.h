@@ -56,7 +56,7 @@ class DriveScene : public Scene {
 
   CarSpec spec_;
   physics::CarState car_;
-  physics::CarState display_prev_;  // pose at the last physics tick boundary
+  physics::CarState display_prev_;  // car pose at the previous physics tick
   double accumulator_ = 0.0;        // leftover time since the last physics tick
   physics::TrackCollision collision_;  // element planes/walls from GAME.PRE
   Palette palette_;                    // VGA colours for track materials
@@ -70,6 +70,7 @@ class DriveScene : public Scene {
 
   Mesh car_mesh_;
   Camera camera_;
+  Camera camera_prev_;  // camera pose at the previous physics tick
 
   // Race loop: start/finish line, 20 Hz clock and the finish state.
   game::StartFinish start_finish_;

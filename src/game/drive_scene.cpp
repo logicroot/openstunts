@@ -297,6 +297,7 @@ void DriveScene::reset_car() {
   const glm::vec3 car_pos = car_world_position(0.0f);
   camera_.position = car_pos + glm::vec3(0.0f, kFollowHeight, -kFollowDistance);
   aim_at(camera_, car_pos + glm::vec3(0.0f, kFollowAimHeight, 0.0f));
+  camera_prev_ = camera_;
 }
 
 void DriveScene::physics_tick(const Controls& controls) {
@@ -351,12 +352,17 @@ void DriveScene::update_camera() {
 void DriveScene::update(double dt, const Controls& controls) {
   if (controls.reset_car) reset_car();
 
-  display_prev_ = car_;  // pose before this frame's ticks (tick N-1)
   accumulator_ += dt;
   int steps = 0;
   while (accumulator_ >= kPhysicsDt && steps < kMaxPhysicsStepsPerFrame) {
     accumulator_ -= kPhysicsDt;
     ++steps;
+    // Snapshot the poses immediately before the step so the renderer can
+    // interpolate *within* the last physics tick (and the camera stays locked
+    // to the car). Capturing once per update() instead would drop the sub-step
+    // interpolation and make the car/camera advance in 20 Hz jumps.
+    display_prev_ = car_;
+    camera_prev_ = camera_;
     physics_tick(controls);
     update_camera();
   }
@@ -432,14 +438,22 @@ void DriveScene::build_hud(std::vector<Vertex>& verts, int width, int height) co
 }
 
 void DriveScene::render(Renderer& renderer, int width, int height) {
-  renderer.draw_world(track_mesh_, camera_);
+  const float alpha = render_alpha();
+  // Interpolate the follow camera alongside the car so the two stay locked.
+  // The camera otherwise only steps at 20 Hz while the car is interpolated,
+  // which makes the car jitter back and forth within the frame.
+  Camera render_cam = camera_;
+  render_cam.position = glm::mix(camera_prev_.position, camera_.position, alpha);
+  aim_at(render_cam, car_world_position(alpha) + glm::vec3(0.0f, kFollowAimHeight, 0.0f));
+
+  renderer.draw_world(track_mesh_, render_cam);
 
   const int phase = world::track_animation_phase(game_frame_);
-  renderer.draw_world(animated_meshes_[phase], camera_);
-  renderer.draw_world_lines(animated_lines_[phase], camera_);
+  renderer.draw_world(animated_meshes_[phase], render_cam);
+  renderer.draw_world_lines(animated_lines_[phase], render_cam);
 
   if (!car_mesh_.empty()) {
-    renderer.draw_world(car_mesh_, camera_, car_model_matrix(render_alpha()));
+    renderer.draw_world(car_mesh_, render_cam, car_model_matrix(alpha));
   }
 
   std::vector<Vertex> hud;
