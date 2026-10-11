@@ -106,8 +106,9 @@ TEST(race_format_matches_frame_as_string) {
   EXPECT_EQ(format_race_time(60 * 10 + 3 * 10 + 4, 10, true), std::string(" 1:03.40"));
 }
 
-TEST(race_state_finish_transition) {
+TEST(race_state_route_gate_and_finish) {
   const StartFinish sf = make_sf(7, 5, 0);
+  const int cx = center(7);
   const int cz = center(5);
   RaceState rs;
   rs.tick();
@@ -116,23 +117,49 @@ TEST(race_state_finish_transition) {
   EXPECT_EQ(rs.game_frame, 3);
   rs.penalty = 40;
 
-  // First sighting of the car in front of the line arms the test.
-  EXPECT_TRUE(!rs.update_finish(0, (cz - 210) * 64, sf));
-  EXPECT_TRUE(rs.armed);
+  // The car spawns on the start cell (route node 0): field_CD stays 0.
+  EXPECT_TRUE(!rs.update_finish(cx * 64, (cz - 210) * 64, sf));
+  EXPECT_EQ(rs.field_cd, 0);
   EXPECT_TRUE(!rs.finished);
 
-  // Crossing forward finishes the run and records the total.
-  EXPECT_TRUE(rs.update_finish(0, (cz + 10) * 64, sf));
+  // Crossing the line forward while still inside the start cell does not arm.
+  EXPECT_TRUE(!rs.update_finish(cx * 64, (cz + 10) * 64, sf));
+  EXPECT_EQ(rs.field_cd, 0);
+
+  // Leaving into the next cell locates a non-start route node.
+  EXPECT_TRUE(!rs.update_finish(cx * 64, (cz + 600) * 64, sf));
+  EXPECT_EQ(rs.field_2f4, 1);
+
+  // Returning to the start cell advances field_CD and, since the car is past
+  // the line, finishes the run and records the total.
+  EXPECT_TRUE(rs.update_finish(cx * 64, (cz + 10) * 64, sf));
+  EXPECT_EQ(rs.field_cd, 1);
   EXPECT_TRUE(rs.finished);
   EXPECT_EQ(rs.total_finish, 43);
 
   // The clock freezes and no further crossing is reported.
   rs.tick();
   EXPECT_EQ(rs.game_frame, 3);
-  EXPECT_TRUE(!rs.update_finish(0, (cz + 200) * 64, sf));
+  EXPECT_TRUE(!rs.update_finish(cx * 64, (cz + 200) * 64, sf));
 
   rs.reset();
   EXPECT_TRUE(!rs.finished);
-  EXPECT_TRUE(!rs.armed);
+  EXPECT_EQ(rs.field_cd, 0);
   EXPECT_EQ(rs.game_frame, 0);
+}
+
+TEST(race_state_offtrack_penalty_keeps_node) {
+  // A cell outside the 30x30 grid returns the -2 penalty and must not disturb
+  // field_2F4 (detect_penalty loc_1792E), so a following return to the start
+  // cell still arms the finish exactly as on a clean lap.
+  const StartFinish sf = make_sf(7, 5, 0);
+  const int cx = center(7);
+  const int cz = center(5);
+  RaceState rs;
+  rs.update_route(cx * 64, (cz + 600) * 64, sf);
+  EXPECT_EQ(rs.field_2f4, 1);
+  rs.update_route(cx * 64, -40 * 64, sf);  // row 69, off the grid
+  EXPECT_EQ(rs.field_2f4, 1);
+  rs.update_finish(cx * 64, (cz + 10) * 64, sf);
+  EXPECT_EQ(rs.field_cd, 1);
 }

@@ -308,8 +308,10 @@ void DriveScene::physics_tick(const Controls& controls) {
   const auto sampler = [this](float wx, float wz) { return ground_sample(track_, wx, wz); };
   physics::step_car_motion(&car_, spec_, physics::kGameFrameRateNormal, sampler, &collision_);
 
-  // Finish-line test (state.c loc_17771): on the forward crossing the original
-  // sets car_crashBmpFlag = 3 and records the total finish time.
+  // Finish-line test (state.c loc_17771): the run only finishes once the car
+  // has returned to route node 0 after passing another node (playerstate
+  // field_CD). On the forward crossing the original sets car_crashBmpFlag = 3
+  // and records the total finish time.
   if (race_.update_finish(car_.car_position.x, car_.car_position.z, start_finish_)) {
     car_.car_crashBmpFlag = 3;
     S3D_INFO("finish: %s", game::format_race_time(race_.total_finish, 20, true).c_str());
