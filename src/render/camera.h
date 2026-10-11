@@ -24,14 +24,25 @@ class Camera {
                                     std::sin(y) * std::cos(p)));
   }
 
+  // The original engine renders through a left-handed camera: world +X maps to
+  // screen-right, +Y up and +Z into the screen (see vector_to_point in the
+  // restunts math.c port, where screen x = world_x * k / depth + centre). GL's
+  // lookAt is right-handed, so `view()` mirrors its X axis to match; screen
+  // right is therefore `up_hint x forward`, not `forward x up_hint`.
   glm::vec3 right() const {
-    return glm::normalize(glm::cross(forward(), glm::vec3(0.0f, 1.0f, 0.0f)));
+    return glm::normalize(glm::cross(glm::vec3(0.0f, 1.0f, 0.0f), forward()));
   }
 
-  glm::vec3 up() const { return glm::normalize(glm::cross(right(), forward())); }
+  glm::vec3 up() const { return glm::normalize(glm::cross(forward(), right())); }
 
   glm::mat4 view() const {
-    return glm::lookAt(position, position + forward(), glm::vec3(0.0f, 1.0f, 0.0f));
+    glm::mat4 v =
+        glm::lookAt(position, position + forward(), glm::vec3(0.0f, 1.0f, 0.0f));
+    // Negate the camera-space X row to flip GL's right-handed basis into the
+    // original engine's left-handed one. Face winding is unaffected because the
+    // renderer does not cull back faces.
+    for (int c = 0; c < 4; ++c) v[c][0] = -v[c][0];
+    return v;
   }
 
   glm::mat4 projection(float aspect) const {
@@ -41,7 +52,9 @@ class Camera {
   void move(const glm::vec3& delta) { position += delta; }
 
   void add_mouse(float dx, float dy, float sensitivity = 0.12f) {
-    yaw_deg += dx * sensitivity;
+    // Under the left-handed view, increasing yaw swings the nose toward -X,
+    // i.e. screen-left, so mouse-right must decrease yaw to look right.
+    yaw_deg -= dx * sensitivity;
     pitch_deg -= dy * sensitivity;
     if (pitch_deg > 89.0f) pitch_deg = 89.0f;
     if (pitch_deg < -89.0f) pitch_deg = -89.0f;
