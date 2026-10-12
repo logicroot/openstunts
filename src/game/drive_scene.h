@@ -8,6 +8,7 @@
 #include <glm/glm.hpp>
 
 #include "assets/car.h"
+#include "assets/crash_overlay.h"
 #include "assets/font.h"
 #include "assets/palette.h"
 #include "assets/sprite2d.h"
@@ -80,6 +81,8 @@ class DriveScene : public Scene {
   BitmapFont text_font_;  // FONTDEF.FNT, the in-game banner/warning font
   Sprite2D arrow_left_;   // SDGAME2.PVS "left"
   Sprite2D arrow_right_;  // SDGAME2.PVS "righ"
+  CrashOverlay crash_;    // GAME.PRE "crak"/"cinf": crashed-windscreen overlay
+  int crash_end_frame_ = -1;  // game_pEndFrame: tick the collision started
   HudRenderer hud_;
   glm::vec4 hud_fg_{1.0f, 1.0f, 1.0f, 1.0f};      // palette index 15
   glm::vec4 hud_shadow_{0.0f, 0.0f, 0.0f, 1.0f};  // palette index 0

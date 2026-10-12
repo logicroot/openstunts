@@ -102,6 +102,22 @@ permutation/sign. There is no stored link between plan/wall and track elements â
 the assembly rules live in the `trkObjectList[215]` table (see
 `reference/restunts/src/restunts/c/frame.c`).
 
+The crashed-windscreen overlay (seg003.asm `init_crak`) uses two more chunks:
+
+```
+struct CINF {                    // "cinf": stage table
+    u16 stage_count;             // 4
+    u16 segment_counts[stage_count];  // 6, 18, 42, 77
+};
+struct CRAK {                    // "crak": 8-byte crack segments
+    s16 x1, y1, x2, y2;          // 320x200 view space, flat array of 77
+};
+```
+
+`init_crak` draws the first `segment_counts[min(frame / (framespersec / 7),
+stage_count - 1)]` segments, each as a white 1px line with a black edge 1px
+above and below; the y coordinates scale with the view height / 200.
+
 ## Palettes
 
 The VGA palette lives in `SDMAIN.PVS` as resource `!pal` (784 bytes): a 16-byte

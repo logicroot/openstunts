@@ -18,6 +18,7 @@ add_executable(s3d_tests
   track_collision_test.cpp
   font_test.cpp
   sprite2d_test.cpp
+  crash_overlay_test.cpp
   race_state_test.cpp
   camera_test.cpp
 )

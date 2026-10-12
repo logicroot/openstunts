@@ -40,6 +40,7 @@ add_library(stunts3d_core STATIC
   src/assets/palette.cpp
   src/assets/font.cpp
   src/assets/sprite2d.cpp
+  src/assets/crash_overlay.cpp
   src/physics/fixed_math.cpp
   src/physics/car_engine.cpp
   src/physics/car_steering.cpp

@@ -87,6 +87,32 @@ void append_sprite(std::vector<Vertex>& out, const Sprite2D& s, const Palette& p
   }
 }
 
+// Appends one line segment as a thin quad (perpendicular thickness `thickness`)
+// for the crashed-windscreen overlay.
+void append_segment(std::vector<Vertex>& out, float x1, float y1, float x2, float y2,
+                    float thickness, const glm::vec4& color) {
+  glm::vec2 a(x1, y1), b(x2, y2);
+  glm::vec2 d = b - a;
+  const float len = glm::length(d);
+  if (len < 1e-4f) {
+    d = glm::vec2(1.0f, 0.0f);
+  } else {
+    d /= len;
+  }
+  const glm::vec2 n(-d.y, d.x);
+  const glm::vec2 o = n * (thickness * 0.5f);
+  Vertex v;
+  v.normal = glm::vec3(0.0f, 0.0f, 1.0f);
+  v.color = color;
+  const glm::vec3 pts[6] = {{a.x - o.x, a.y - o.y, 0.0f}, {a.x + o.x, a.y + o.y, 0.0f},
+                            {b.x + o.x, b.y + o.y, 0.0f}, {a.x - o.x, a.y - o.y, 0.0f},
+                            {b.x + o.x, b.y + o.y, 0.0f}, {b.x - o.x, b.y - o.y, 0.0f}};
+  for (const glm::vec3& p : pts) {
+    v.position = p;
+    out.push_back(v);
+  }
+}
+
 void aim_at(Camera& cam, const glm::vec3& target) {
   const glm::vec3 d = glm::normalize(target - cam.position);
   cam.yaw_deg = glm::degrees(std::atan2(d.z, d.x));
@@ -285,6 +311,13 @@ bool DriveScene::on_enter() {
     } else {
       S3D_WARN("SDGAME2.PVS arrows not found; the direction arrow is disabled");
     }
+    // The crashed-windscreen pattern (seg003.asm init_crak) lives in GAME.PRE.
+    if (crash_.load_from_game_pre(path_join(asset_dir_, "GAME.PRE"))) {
+      S3D_INFO("crash overlay loaded: %zu segments, %d stages", crash_.segments().size(),
+               crash_.stage_count());
+    } else {
+      S3D_WARN("GAME.PRE crak/cinf not found; the crash overlay is disabled");
+    }
   }
   if (!hud_.init()) S3D_WARN("HUD renderer initialization failed");
   hud_fg_ = have_palette ? palette_color(palette_, 15) : glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
@@ -297,6 +330,7 @@ bool DriveScene::on_enter() {
 
 void DriveScene::reset_car() {
   car_ = physics::CarState{};
+  crash_end_frame_ = -1;
   car_.car_transmission = physics::kTransmissionAutomatic;
   car_.car_current_gear = 1;
   car_.car_changing_gear = physics::kGearChangeInactive;
@@ -369,6 +403,13 @@ void DriveScene::physics_tick(const Controls& controls) {
   physics::update_grip(&car_, spec_);
   const auto sampler = [this](float wx, float wz) { return ground_sample(track_, wx, wz); };
   physics::step_car_motion(&car_, spec_, physics::kGameFrameRateNormal, sampler, &collision_);
+
+  // game_pEndFrame (statecrs.c loc_19760): the tick the collision started. It is
+  // set once, on the frame car_crashBmpFlag transitions to the crash state, and
+  // is the animation origin for the cracked-windscreen overlay (init_crak).
+  if (car_.car_crashBmpFlag == physics::kCrashEventCollision && crash_end_frame_ < 0) {
+    crash_end_frame_ = game_frame_;
+  }
 
   // Finish-line test (state.c loc_17771): the run only finishes once the car
   // has returned to route node 0 after passing another node (playerstate
@@ -486,6 +527,32 @@ glm::mat4 DriveScene::car_model_matrix(float alpha) const {
 
 void DriveScene::build_hud(std::vector<Vertex>& verts, int width, int height) const {
   const int scale = std::max(1, height / 200);
+
+  // Crashed-windscreen overlay (seg003.asm init_crak). The original draws it
+  // before the in-game text (frame.c init_crak precedes draw_ingame_text). The
+  // crack coordinates are authored for a 320x200 view: the y axis scales with
+  // the view height / 200 and the pattern is centred horizontally.
+  if (car_.car_crashBmpFlag == physics::kCrashEventCollision && crash_.valid() &&
+      crash_end_frame_ >= 0) {
+    const float s = static_cast<float>(scale);
+    const float offx = (static_cast<float>(width) - 320.0f * s) * 0.5f;
+    const int framecount = std::max(0, game_frame_ - crash_end_frame_);
+    const int count = crash_.visible_segments(framecount, physics::kGameFrameRateNormal);
+    const auto& segs = crash_.segments();
+    const int n = std::min(count, static_cast<int>(segs.size()));
+    for (int i = 0; i < n; ++i) {
+      const CrashCrack& c = segs[static_cast<size_t>(i)];
+      const float x1 = offx + static_cast<float>(c.x1) * s;
+      const float x2 = offx + static_cast<float>(c.x2) * s;
+      const float y1 = static_cast<float>(c.y1) * s;
+      const float y2 = static_cast<float>(c.y2) * s;
+      // Each crack line is a white core with a black edge 1px above and below
+      // (preRender_line with colours 0, 0 and dialog_fnt_colour = 15).
+      append_segment(verts, x1, y1 - s, x2, y2 - s, s, hud_shadow_);
+      append_segment(verts, x1, y1 + s, x2, y2 + s, s, hud_shadow_);
+      append_segment(verts, x1, y1, x2, y2, s, hud_fg_);
+    }
+  }
 
   // The original draws the elapsed time with FONTLED at x=0x8C (320-wide screen)
   // and y=roofbmpheight+2; here it sits at the top centre and scales with the
