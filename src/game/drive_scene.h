@@ -3,6 +3,7 @@
 // 20 Hz rate, rendered at the application's 60 Hz frame rate with pose
 // interpolation, plus the follow camera and keyboard input.
 
+#include <memory>
 #include <string>
 
 #include <glm/glm.hpp>
@@ -20,6 +21,7 @@
 #include "render/camera.h"
 #include "render/hud.h"
 #include "render/mesh.h"
+#include "world/car_mesh.h"
 #include "world/track_shapes.h"
 
 namespace s3d {
@@ -41,6 +43,11 @@ class DriveScene : public Scene {
   void reset_car();
   void physics_tick(const Controls& controls);
   void update_camera();
+
+  // (Re)builds the player car meshes for the current `wheel_pose_`: the bodywork
+  // plus the four wheels steered/travelled exactly as the original `sub_204AE`.
+  // Also refreshes car_bounds_* the first time.
+  void build_car_meshes();
 
   // Builds the in-game HUD quads (crash explosion, crack/sinking overlay, race
   // clock, direction arrow/warning, penalty banner) in pixel coordinates.
@@ -72,6 +79,7 @@ class DriveScene : public Scene {
   double accumulator_ = 0.0;        // leftover time since the last physics tick
   physics::TrackCollision collision_;  // element planes/walls from GAME.PRE
   Palette palette_;                    // VGA colours for track materials
+  bool have_palette_ = false;
 
   Mesh track_mesh_;  // static terrain + non-animated elements
   // Animated objects (windmill sails, flashing sign, ...) prebuilt for each of
@@ -84,6 +92,10 @@ class DriveScene : public Scene {
   // Same geometry as car_mesh_ but with the rear lights lit (material 0x2F
   // instead of 0x2E); drawn while the car is braking.
   Mesh car_mesh_braking_;
+  // Player car shape archive (STCOUN.P3S) and the wheel pose the meshes were
+  // last built with (frame.c sub_204AE: steering + per-wheel suspension).
+  std::shared_ptr<ShapeLibrary> car_lib_;
+  world::CarWheelPose wheel_pose_;
   // Player car local bounding box (car_mesh_ vertices, identity model), used to
   // project the car to screen for the crash explosion.
   glm::vec3 car_bounds_min_{0.0f};

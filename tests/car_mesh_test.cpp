@@ -1,5 +1,8 @@
+#include <array>
 #include <cstdint>
 #include <string>
+
+#include <glm/glm.hpp>
 
 #include "assets/palette.h"
 #include "assets/shape3d.h"
@@ -135,6 +138,225 @@ TEST(car_append_selects_livery_slot) {
   if (v0.size() == v1.size()) {
     for (size_t i = 0; i < v0.size(); ++i) {
       if (v0[i].color != v1[i].color) {
+        differs = true;
+        break;
+      }
+    }
+  }
+  EXPECT_TRUE(differs);
+}
+
+namespace {
+
+// The six vertices of wheel `w` of a car1 shape (0..3: front-left, front-right,
+// rear-right, rear-left).
+std::array<Vec3i, 6> wheel_verts(const Shape3D& s, int w) {
+  std::array<Vec3i, 6> out{};
+  for (int i = 0; i < 6; ++i) {
+    out[static_cast<size_t>(i)] =
+        s.vertices[static_cast<size_t>(kCarWheelFirstVertex + w * 6 + i)];
+  }
+  return out;
+}
+
+}  // namespace
+
+// sub_204AE is a no-op at rest: steering 0 and no suspension travel leave the
+// authored mesh untouched (the original skips the block while the cached angle
+// is unchanged).
+TEST(car_wheel_pose_rest_is_identity) {
+  const std::string dir = find_asset_dir();
+  if (dir.empty()) return;
+  ShapeLibrary lib;
+  if (!load_car_archive(dir, "COUN", &lib)) return;
+  const Shape3D* car1 = lib.find("car1");
+  if (car1 == nullptr) return;
+  if (car1->vertices.size() <
+      static_cast<size_t>(kCarWheelFirstVertex + kCarWheelVertexCount)) {
+    return;
+  }
+
+  Shape3D posed = *car1;
+  apply_car_wheel_pose(&posed, CarWheelPose{});
+  for (size_t i = 0; i < car1->vertices.size(); ++i) {
+    EXPECT_TRUE(posed.vertices[i].x == car1->vertices[i].x);
+    EXPECT_TRUE(posed.vertices[i].y == car1->vertices[i].y);
+    EXPECT_TRUE(posed.vertices[i].z == car1->vertices[i].z);
+  }
+}
+
+// Every wheel drops by |car_rc2| >> 6 world units; a car2 (no wheel block) is
+// left unchanged.
+TEST(car_wheel_pose_suspension_drops_wheels) {
+  const std::string dir = find_asset_dir();
+  if (dir.empty()) return;
+  ShapeLibrary lib;
+  if (!load_car_archive(dir, "COUN", &lib)) return;
+  const Shape3D* car1 = lib.find("car1");
+  if (car1 == nullptr) return;
+  if (car1->vertices.size() <
+      static_cast<size_t>(kCarWheelFirstVertex + kCarWheelVertexCount)) {
+    return;
+  }
+
+  CarWheelPose pose;
+  const int16_t travel[4] = {64, 128, 192, 256};
+  for (int i = 0; i < 4; ++i) pose.suspension[i] = travel[i];
+  Shape3D posed = *car1;
+  apply_car_wheel_pose(&posed, pose);
+
+  for (int w = 0; w < 4; ++w) {
+    const int drop = travel[w] >> 6;
+    for (int i = 0; i < 6; ++i) {
+      const size_t idx = static_cast<size_t>(kCarWheelFirstVertex + w * 6 + i);
+      EXPECT_TRUE(posed.vertices[idx].y == car1->vertices[idx].y - drop);
+      // x/z are only touched by the steering block, which is skipped here.
+      EXPECT_TRUE(posed.vertices[idx].x == car1->vertices[idx].x);
+      EXPECT_TRUE(posed.vertices[idx].z == car1->vertices[idx].z);
+    }
+  }
+}
+
+// A full steering turn (0x400 = 360 degrees, i.e. a half-angle of 180 degrees)
+// makes sub_204AE the identity: sin = 0 and cos = -1, so
+// x' = px - (px - x) = x and z' = pz - (pz - z) = z, leaving the whole car
+// unchanged.
+TEST(car_wheel_pose_full_turn_is_identity) {
+  const std::string dir = find_asset_dir();
+  if (dir.empty()) return;
+  ShapeLibrary lib;
+  if (!load_car_archive(dir, "COUN", &lib)) return;
+  const Shape3D* car1 = lib.find("car1");
+  if (car1 == nullptr) return;
+  if (car1->vertices.size() <
+      static_cast<size_t>(kCarWheelFirstVertex + kCarWheelVertexCount)) {
+    return;
+  }
+
+  CarWheelPose pose;
+  pose.posed = true;
+  pose.steering_angle = 0x400;
+  Shape3D posed = *car1;
+  apply_car_wheel_pose(&posed, pose);
+  for (size_t i = 0; i < car1->vertices.size(); ++i) {
+    EXPECT_TRUE(posed.vertices[i].x == car1->vertices[i].x);
+    EXPECT_TRUE(posed.vertices[i].y == car1->vertices[i].y);
+    EXPECT_TRUE(posed.vertices[i].z == car1->vertices[i].z);
+  }
+}
+
+// Steering rotates only the two front wheels (0, 1): their six vertices move in
+// x/z while the rear wheels (2, 3) keep their x/z untouched and every wheel's y
+// is left to the suspension step.
+TEST(car_wheel_pose_steers_front_wheels) {
+  const std::string dir = find_asset_dir();
+  if (dir.empty()) return;
+  ShapeLibrary lib;
+  if (!load_car_archive(dir, "COUN", &lib)) return;
+  const Shape3D* car1 = lib.find("car1");
+  if (car1 == nullptr) return;
+  if (car1->vertices.size() <
+      static_cast<size_t>(kCarWheelFirstVertex + kCarWheelVertexCount)) {
+    return;
+  }
+
+  CarWheelPose pose;
+  pose.posed = true;
+  pose.steering_angle = 0x100;  // quarter turn of the steering wheel (90 degrees)
+  Shape3D posed = *car1;
+  apply_car_wheel_pose(&posed, pose);
+
+  for (int w = 0; w < 4; ++w) {
+    const auto before = wheel_verts(*car1, w);
+    const auto after = wheel_verts(posed, w);
+    if (w < 2) {
+      bool moved = false;
+      for (int i = 0; i < 6; ++i) {
+        if (after[static_cast<size_t>(i)].x != before[static_cast<size_t>(i)].x ||
+            after[static_cast<size_t>(i)].z != before[static_cast<size_t>(i)].z) {
+          moved = true;
+        }
+        EXPECT_TRUE(after[static_cast<size_t>(i)].y == before[static_cast<size_t>(i)].y);
+      }
+      EXPECT_TRUE(moved);
+    } else {
+      // Rear wheels: no steering transform.
+      for (int i = 0; i < 6; ++i) {
+        EXPECT_TRUE(after[static_cast<size_t>(i)].x == before[static_cast<size_t>(i)].x);
+        EXPECT_TRUE(after[static_cast<size_t>(i)].z == before[static_cast<size_t>(i)].z);
+      }
+    }
+  }
+}
+
+// A steering angle whose half rounds to zero (|a| == 1) makes sub_204AE a point
+// reflection about each front-wheel pivot: the sine is 0 and the cosine is 1, so
+//   x' = px + (px - x) = 2*px - x,  z' = pz + (pz - z) = 2*pz - z.
+// The pivots are derived exactly like shape3d_load_car_shapes.
+TEST(car_wheel_pose_tiny_angle_reflects_about_pivot) {
+  const std::string dir = find_asset_dir();
+  if (dir.empty()) return;
+  ShapeLibrary lib;
+  if (!load_car_archive(dir, "COUN", &lib)) return;
+  const Shape3D* car1 = lib.find("car1");
+  if (car1 == nullptr) return;
+  if (car1->vertices.size() <
+      static_cast<size_t>(kCarWheelFirstVertex + kCarWheelVertexCount)) {
+    return;
+  }
+
+  const std::vector<Vec3i>& rest = car1->vertices;
+  const int base = kCarWheelFirstVertex;
+  const int px[2] = {(rest[base + 3].x + rest[base + 0].x) >> 1,
+                     (rest[base + 9].x + rest[base + 6].x) >> 1};
+  const int pz[2] = {rest[base + 0].z, rest[base + 6].z};
+
+  CarWheelPose pose;
+  pose.posed = true;
+  pose.steering_angle = 1;
+  Shape3D posed = *car1;
+  apply_car_wheel_pose(&posed, pose);
+
+  for (int w = 0; w < 2; ++w) {
+    for (int i = 0; i < 6; ++i) {
+      const size_t idx = static_cast<size_t>(base + w * 6 + i);
+      EXPECT_TRUE(posed.vertices[idx].x == 2 * px[w] - rest[idx].x);
+      EXPECT_TRUE(posed.vertices[idx].z == 2 * pz[w] - rest[idx].z);
+      EXPECT_TRUE(posed.vertices[idx].y == rest[idx].y);
+    }
+  }
+  // Rear wheels are untouched by the steering transform.
+  for (size_t idx = static_cast<size_t>(base + 12); idx < static_cast<size_t>(base + 24); ++idx) {
+    EXPECT_TRUE(posed.vertices[idx].x == rest[idx].x);
+    EXPECT_TRUE(posed.vertices[idx].z == rest[idx].z);
+  }
+}
+
+// append_car_model threads the pose through to the emitted geometry: the same
+// vertex count, but the wheel triangles sit at the steered positions.
+TEST(car_append_applies_wheel_pose) {
+  const std::string dir = find_asset_dir();
+  if (dir.empty()) return;
+  ShapeLibrary lib;
+  if (!load_car_archive(dir, "COUN", &lib)) return;
+  if (lib.find("car1") == nullptr) return;
+
+  const auto color = [](uint8_t) { return glm::vec4(0.8f, 0.1f, 0.1f, 1.0f); };
+  MeshBuilder rest;
+  append_car_model(rest, lib, glm::mat4(1.0f), color, 0, nullptr);
+  CarWheelPose pose;
+  pose.posed = true;
+  pose.steering_angle = 0x180;
+  MeshBuilder steered;
+  append_car_model(steered, lib, glm::mat4(1.0f), color, 0, &pose);
+
+  EXPECT_EQ(rest.vertex_count(), steered.vertex_count());
+  bool differs = false;
+  const std::vector<Vertex>& a = rest.vertices();
+  const std::vector<Vertex>& b = steered.vertices();
+  if (a.size() == b.size()) {
+    for (size_t i = 0; i < a.size(); ++i) {
+      if (a[i].position != b[i].position) {
         differs = true;
         break;
       }

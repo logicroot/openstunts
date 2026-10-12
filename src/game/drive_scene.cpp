@@ -244,49 +244,13 @@ bool DriveScene::on_enter() {
   // ---- Player car ----------------------------------------------------------
   spec_ = load_or_default_spec(asset_dir_);
 
-  auto car_lib = std::make_shared<ShapeLibrary>();
-  if (!asset_dir_.empty() && world::load_car_archive(asset_dir_, "COUN", car_lib.get())) {
-    // Bodywork is shaded with the original material table: every non-rear-light
-    // paint byte is a material index resolved through material_color_list, just
-    // like the track and scenery. The shape's livery slot is
-    // gameconfig.game_playermaterial (default 0).
-    //
-    // Rear-light colour: the original swaps paint job 0x2D for
-    // `backlights_paint_override`, material 0x2E when coasting and 0x2F while
-    // braking (frame.c). Those materials resolve to palette 4 / 12.
-    const glm::vec4 backlight_off = have_palette ? world::material_color(0x2E, palette_)
-                                                  : glm::vec4(0.67f, 0.0f, 0.0f, 1.0f);
-    const glm::vec4 backlight_on =
-        have_palette ? world::material_color(0x2F, palette_) : glm::vec4(1.0f, 0.33f, 0.33f, 1.0f);
-
-    // Resolves one car primitive paint byte. Without SDMAIN.PVS the material
-    // table has no palette to sample, so fall back to the placeholder track
-    // colours (still routing the rear-light sentinel to `backlight`).
-    const Palette* pal = have_palette ? &palette_ : nullptr;
-    const auto car_color = [pal](const glm::vec4& backlight) -> world::PaintColorFn {
-      return [pal, backlight](uint8_t paint) -> glm::vec4 {
-        if (pal != nullptr) return world::car_primitive_color(paint, *pal, backlight);
-        return paint == world::kCarBacklightPaint ? backlight : world::track_paint_color(paint);
-      };
-    };
-
-    MeshBuilder mb;
-    world::append_car_model(mb, *car_lib, glm::mat4(1.0f), car_color(backlight_off));
-    const std::vector<Vertex>& verts = mb.vertices();
-    if (!verts.empty()) {
-      car_bounds_min_ = car_bounds_max_ = verts.front().position;
-      for (const Vertex& v : verts) {
-        car_bounds_min_ = glm::min(car_bounds_min_, v.position);
-        car_bounds_max_ = glm::max(car_bounds_max_, v.position);
-      }
-      car_bounds_valid_ = true;
-    }
-    car_mesh_ = mb.to_mesh();
-
-    MeshBuilder mbb;
-    world::append_car_model(mbb, *car_lib, glm::mat4(1.0f), car_color(backlight_on));
-    car_mesh_braking_ = mbb.to_mesh();
+  have_palette_ = have_palette;
+  car_lib_ = std::make_shared<ShapeLibrary>();
+  if (asset_dir_.empty() || !world::load_car_archive(asset_dir_, "COUN", car_lib_.get())) {
+    car_lib_.reset();
   }
+  wheel_pose_ = world::CarWheelPose{};
+  build_car_meshes();
   if (car_mesh_.empty()) {
     S3D_WARN("player car shapes not found; driving invisible");
   }
@@ -377,6 +341,59 @@ bool DriveScene::on_enter() {
   return true;
 }
 
+void DriveScene::build_car_meshes() {
+  if (car_lib_ == nullptr) return;
+
+  // Bodywork is shaded with the original material table: every non-rear-light
+  // paint byte is a material index resolved through material_color_list, just
+  // like the track and scenery. The shape's livery slot is
+  // gameconfig.game_playermaterial (default 0).
+  //
+  // Rear-light colour: the original swaps paint job 0x2D for
+  // `backlights_paint_override`, material 0x2E when coasting and 0x2F while
+  // braking (frame.c). Those materials resolve to palette 4 / 12.
+  const glm::vec4 backlight_off = have_palette_ ? world::material_color(0x2E, palette_)
+                                                : glm::vec4(0.67f, 0.0f, 0.0f, 1.0f);
+  const glm::vec4 backlight_on =
+      have_palette_ ? world::material_color(0x2F, palette_) : glm::vec4(1.0f, 0.33f, 0.33f, 1.0f);
+
+  // Resolves one car primitive paint byte. Without SDMAIN.PVS the material table
+  // has no palette to sample, so fall back to the placeholder track colours
+  // (still routing the rear-light sentinel to `backlight`).
+  const Palette* pal = have_palette_ ? &palette_ : nullptr;
+  const auto car_color = [pal](const glm::vec4& backlight) -> world::PaintColorFn {
+    return [pal, backlight](uint8_t paint) -> glm::vec4 {
+      if (pal != nullptr) return world::car_primitive_color(paint, *pal, backlight);
+      return paint == world::kCarBacklightPaint ? backlight : world::track_paint_color(paint);
+    };
+  };
+
+  // frame.c calls sub_204AE on the car shape every frame with the steering angle
+  // and car_rc2, so the front wheels steer and every wheel rides its suspension.
+  MeshBuilder mb;
+  world::append_car_model(mb, *car_lib_, glm::mat4(1.0f), car_color(backlight_off), 0,
+                          &wheel_pose_);
+  // The player car local bounding box (used to project the car to screen for the
+  // crash explosion) is captured at the rest pose so it stays stable.
+  if (!car_bounds_valid_) {
+    const std::vector<Vertex>& verts = mb.vertices();
+    if (!verts.empty()) {
+      car_bounds_min_ = car_bounds_max_ = verts.front().position;
+      for (const Vertex& v : verts) {
+        car_bounds_min_ = glm::min(car_bounds_min_, v.position);
+        car_bounds_max_ = glm::max(car_bounds_max_, v.position);
+      }
+      car_bounds_valid_ = true;
+    }
+  }
+  car_mesh_ = mb.to_mesh();
+
+  MeshBuilder mbb;
+  world::append_car_model(mbb, *car_lib_, glm::mat4(1.0f), car_color(backlight_on), 0,
+                          &wheel_pose_);
+  car_mesh_braking_ = mbb.to_mesh();
+}
+
 void DriveScene::reset_car() {
   car_ = physics::CarState{};
   crash_end_frame_ = -1;
@@ -426,6 +443,10 @@ void DriveScene::reset_car() {
   game_frame_ = 0;
   race_.reset();
 
+  // Return the wheels to their rest pose (steering centred, suspension relaxed).
+  wheel_pose_ = world::CarWheelPose{};
+  build_car_meshes();
+
   // Snap the camera behind the car so the first frame is already framed.
   const glm::vec3 car_pos = car_world_position(0.0f);
   camera_.position = car_pos + glm::vec3(0.0f, kFollowHeight, -kFollowDistance);
@@ -452,6 +473,33 @@ void DriveScene::physics_tick(const Controls& controls) {
   physics::update_grip(&car_, spec_);
   const auto sampler = [this](float wx, float wz) { return ground_sample(track_, wx, wz); };
   physics::step_car_motion(&car_, spec_, physics::kGameFrameRateNormal, sampler, &collision_);
+
+  // Animate the wheels exactly like the original: frame.c calls sub_204AE every
+  // frame with car_steeringAngle and car_rc2 (the per-wheel suspension travel),
+  // so the front wheels steer and every wheel follows its suspension.
+  //
+  // sub_204AE caches the last steering angle (`word_443E8[4]`, loaded as 0) and
+  // only re-applies the x/z transform when it changes. The mesh is rebuilt from
+  // the rest shape here, so mirror that cache: the authored mesh stays until the
+  // car first steers, and once `posed` is set the transform is re-applied for
+  // every angle change -- including back at 0, where it degenerates to the
+  // original's point reflection about each front-wheel pivot.
+  world::CarWheelPose next_wheel_pose = wheel_pose_;
+  if (!next_wheel_pose.posed) {
+    if (car_.car_steeringAngle != 0) {
+      next_wheel_pose.posed = true;
+      next_wheel_pose.steering_angle = car_.car_steeringAngle;
+    }
+  } else if (car_.car_steeringAngle != next_wheel_pose.steering_angle) {
+    next_wheel_pose.steering_angle = car_.car_steeringAngle;
+  }
+  for (int i = 0; i < 4; ++i) {
+    next_wheel_pose.suspension[i] = car_.car_suspension_deflection[i];
+  }
+  if (next_wheel_pose != wheel_pose_) {
+    wheel_pose_ = next_wheel_pose;
+    build_car_meshes();
+  }
 
   // game_pEndFrame (statecrs.c loc_19760): the tick the crash started. It is set
   // once, on the frame car_crashBmpFlag transitions from 0 to any crash state,

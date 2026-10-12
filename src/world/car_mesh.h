@@ -27,6 +27,45 @@ namespace s3d::world {
 // (seg006.asm loc_25D3C / c/shape3d.c loc_25D3C).
 inline constexpr uint8_t kCarBacklightPaint = 0x2D;
 
+// car1 (the full-detail racing body) keeps its four wheels in vertices 8..31,
+// six vertices per wheel in the order front-left, front-right, rear-right,
+// rear-left. The original animates exactly this block every frame in
+// `sub_204AE` (seg004.asm 3830 / c/shape3d.c 5012), called from frame.c with
+// the car's steering angle and `car_rc2` (the per-wheel suspension travel).
+inline constexpr int kCarWheelFirstVertex = 8;
+inline constexpr int kCarWheelVertexCount = 24;
+
+// Visual wheel pose fed to `apply_car_wheel_pose`.
+//
+// `posed` mirrors the original's steering-angle cache (`word_443E8[4]`,
+// seg004.asm 3855): `sub_204AE` re-applies the front-wheel x/z transform only
+// when the steering angle differs from the cached one, and the cache starts at
+// 0. So the authored mesh is shown while the car has never steered, and after
+// the first steering input the transform is re-applied on every change --
+// including back at angle 0, where the formula degenerates to a point
+// reflection about each front-wheel pivot.
+struct CarWheelPose {
+  bool posed = false;          // has the front-wheel transform ever been applied?
+  int16_t steering_angle = 0;  // CARSTATE.car_steeringAngle, 1/1024 turn units
+  int16_t suspension[4] = {0, 0, 0, 0};  // CARSTATE.car_rc2, 1/64 world units
+
+  bool operator==(const CarWheelPose& o) const {
+    return posed == o.posed && steering_angle == o.steering_angle &&
+           suspension[0] == o.suspension[0] && suspension[1] == o.suspension[1] &&
+           suspension[2] == o.suspension[2] && suspension[3] == o.suspension[3];
+  }
+  bool operator!=(const CarWheelPose& o) const { return !(*this == o); }
+};
+
+// Applies the pose to a car1 shape in place, exactly mirroring `sub_204AE`:
+//   * when `pose.posed` is set, the two front wheels are transformed about
+//     their own pivots by half the steering angle (the original halves the
+//     angle with a 16-bit arithmetic shift);
+//   * every wheel's vertices drop by (|car_rc2[wheel]| >> 6) world units.
+// A shape without the 24-vertex wheel block (i.e. car2) is left unchanged.
+// Exposed for tests.
+void apply_car_wheel_pose(Shape3D* shape, const CarWheelPose& pose);
+
 // Loads `ST<car_id>.P3S` from `asset_dir`. `car_id` is four characters, e.g.
 // "COUN". Returns false if the archive cannot be read.
 bool load_car_archive(const std::string& asset_dir, const std::string& car_id,
@@ -54,7 +93,11 @@ glm::vec4 car_primitive_color(uint8_t paint, const Palette& palette,
 // `gameconfig.game_opponentmaterial` for the opponent, picking one of the
 // shape's `num_paints` livery variants (0..6 for the retail cars). An
 // out-of-range slot clamps to 0.
+//
+// When `wheel_pose` is non-null the car1 wheel block is animated with it first
+// (frame.c sub_204AE: steering + suspension). car2 has no wheels and ignores it.
 void append_car_model(MeshBuilder& mb, const ShapeLibrary& car_lib, const glm::mat4& model,
-                      const PaintColorFn& color_for, int material = 0);
+                      const PaintColorFn& color_for, int material = 0,
+                      const CarWheelPose* wheel_pose = nullptr);
 
 }  // namespace s3d::world
