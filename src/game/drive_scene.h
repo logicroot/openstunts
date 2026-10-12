@@ -81,6 +81,9 @@ class DriveScene : public Scene {
   int game_frame_ = 0;  // advances with the 20 Hz physics ticks
 
   Mesh car_mesh_;
+  // Same geometry as car_mesh_ but with the rear lights lit (material 0x2F
+  // instead of 0x2E); drawn while the car is braking.
+  Mesh car_mesh_braking_;
   // Player car local bounding box (car_mesh_ vertices, identity model), used to
   // project the car to screen for the crash explosion.
   glm::vec3 car_bounds_min_{0.0f};

@@ -163,6 +163,14 @@ An out-of-range slot clamps to 0. This drives the windmill sails (`wind`:
 material 113 sail vs. 118 transparent mask) and Joe's flashing sign (`rest`).
 Material 118 is a fully transparent mask and is never drawn.
 
+Car bodies (`ST<ID>.P3S`) carry riding geometry plus a special paint job `0x2D`
+that always marks the **rear light** polygons. The original never draws that
+livery: it substitutes `backlights_paint_override`, which `frame.c` sets to
+material `0x2E` while coasting and `0x2F` while the brake pedal is down
+(`shape3d.c` / `seg006.asm loc_25D3C`). Materials `0x2D`/`0x2E` resolve to
+palette 4 (dark red) and `0x2F` to palette 12 (bright red), so the lights
+brighten under braking.
+
 ## 2D sprites (`.PVS`)
 
 A `.PVS` also decompresses to a resource archive, but its chunks are flat 2D

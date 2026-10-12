@@ -248,8 +248,16 @@ bool DriveScene::on_enter() {
 
   auto car_lib = std::make_shared<ShapeLibrary>();
   if (!asset_dir_.empty() && world::load_car_archive(asset_dir_, "COUN", car_lib.get())) {
+    // Rear-light colour: the original swaps the backlight paint job for
+    // `backlights_paint_override`, material 0x2E when coasting and 0x2F while
+    // braking (frame.c). Those materials resolve to palette 4 / 12.
+    const glm::vec4 backlight_off = have_palette ? world::material_color(0x2E, palette_)
+                                                  : glm::vec4(0.67f, 0.0f, 0.0f, 1.0f);
+    const glm::vec4 backlight_on =
+        have_palette ? world::material_color(0x2F, palette_) : glm::vec4(1.0f, 0.33f, 0.33f, 1.0f);
+
     MeshBuilder mb;
-    world::append_car_model(mb, *car_lib, glm::mat4(1.0f), kPlayerCarColor);
+    world::append_car_model(mb, *car_lib, glm::mat4(1.0f), kPlayerCarColor, backlight_off);
     const std::vector<Vertex>& verts = mb.vertices();
     if (!verts.empty()) {
       car_bounds_min_ = car_bounds_max_ = verts.front().position;
@@ -260,6 +268,10 @@ bool DriveScene::on_enter() {
       car_bounds_valid_ = true;
     }
     car_mesh_ = mb.to_mesh();
+
+    MeshBuilder mbb;
+    world::append_car_model(mbb, *car_lib, glm::mat4(1.0f), kPlayerCarColor, backlight_on);
+    car_mesh_braking_ = mbb.to_mesh();
   }
   if (car_mesh_.empty()) {
     S3D_WARN("player car shapes not found; driving invisible");
@@ -715,7 +727,9 @@ void DriveScene::render(Renderer& renderer, int width, int height) {
   renderer.draw_world_lines(animated_lines_[phase], render_cam);
 
   if (!car_mesh_.empty()) {
-    renderer.draw_world(car_mesh_, render_cam, car_model_matrix(alpha));
+    const Mesh& body =
+        (car_.car_is_braking != 0 && !car_mesh_braking_.empty()) ? car_mesh_braking_ : car_mesh_;
+    renderer.draw_world(body, render_cam, car_model_matrix(alpha));
   }
 
   glm::vec4 car_rect;

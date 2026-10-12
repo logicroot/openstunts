@@ -80,3 +80,21 @@ TEST(append_car_model_emits_triangles) {
   EXPECT_TRUE(mb.vertex_count() > 0);
   EXPECT_TRUE(mb.indices().size() % 3 == 0);
 }
+
+// Car paint jobs route to different fills: tyres (38) to the dark tread
+// colour, the rear lights (0x2D) to `backlight_color`, everything else to
+// `body_color`. The 0x2D sentinel is what shape3d swaps for
+// `backlights_paint_override`.
+TEST(car_primitive_color_routes_backlights) {
+  const glm::vec4 body(0.8f, 0.6f, 0.1f, 1.0f);
+  const glm::vec4 light(1.0f, 0.33f, 0.33f, 1.0f);
+
+  EXPECT_TRUE(car_primitive_color(0x2D, body, light) == light);
+  EXPECT_TRUE(car_primitive_color(44, body, light) == body);
+
+  // Tyres ignore both caller colours and use the fixed dark tread colour.
+  const glm::vec4 tread = car_primitive_color(38, body, light);
+  EXPECT_TRUE(tread != body);
+  EXPECT_TRUE(tread != light);
+  EXPECT_TRUE(tread.r < 0.2f && tread.g < 0.2f && tread.b < 0.2f);
+}

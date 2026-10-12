@@ -23,6 +23,15 @@ TEST(material_color_index_matches_reference) {
   EXPECT_EQ(material_color_index(128), 17u);  // last entry
 }
 
+// The rear lights override the "backlight" livery paint job (0x2D) with
+// material 0x2E when coasting and 0x2F while braking (frame.c). Both resolve to
+// palette reds, the braking one brighter.
+TEST(material_color_index_backlights) {
+  EXPECT_EQ(material_color_index(0x2D), 4u);
+  EXPECT_EQ(material_color_index(0x2E), 4u);
+  EXPECT_EQ(material_color_index(0x2F), 12u);
+}
+
 TEST(material_color_index_out_of_range_is_black) {
   EXPECT_EQ(material_color_index(kMaterialCount), 0u);
   EXPECT_EQ(material_color_index(200), 0u);
