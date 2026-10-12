@@ -51,6 +51,11 @@ struct CarSpec {
   int16_t sliding = 0;
   int16_t surface_grip[4] = {0};
 
+  // The word that follows surfacegrip[3] in the SIMD struct (offset 190). The
+  // engine indexes its `sliding_values` array by surface id, so surface 5
+  // (water) reads this neighbouring word rather than wrapping to grass.
+  int16_t sliding_water = 0;
+
   Point2D collide_points[2] = {};
   int16_t car_height = 0;
   Vector3i16 wheel_coords[4] = {};

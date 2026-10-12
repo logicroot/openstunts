@@ -29,4 +29,9 @@ int16_t scale_cornering_angle(int16_t angle, int shift);
 // damp_collision_angle, physics_collision.c).
 int16_t damp_collision_angle(int16_t angle);
 
+// Grip word the engine reads for `surface` (the original's sliding_values
+// array, indexed by the wheel surface id): 0 = airborne, 1..4 = surfacegrip
+// [0..3], 5 = water (the word stored after surfacegrip[3], SIMD offset 190).
+int16_t grip_value_for_surface(int surface, const CarSpec& spec);
+
 }  // namespace s3d::physics

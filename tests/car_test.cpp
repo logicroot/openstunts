@@ -38,6 +38,7 @@ TEST(car_loads_countach_spec) {
   EXPECT_EQ(car.surface_grip[1], 192);  // dirt
   EXPECT_EQ(car.surface_grip[2], 64);   // ice
   EXPECT_EQ(car.surface_grip[3], 128);  // grass
+  EXPECT_EQ(car.sliding_water, 0);      // the word after surfacegrip[3]
   EXPECT_EQ(car.car_height, 16);
   EXPECT_EQ(car.gear_ratios[1], 33339);
 }

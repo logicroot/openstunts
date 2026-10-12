@@ -54,11 +54,12 @@ constexpr int kSlideSpeedPenaltyShift = 1;
 // Speed penalty per grass wheel count: {0, 1, 2, 3, 4} wheels.
 constexpr uint16_t kGrassDecelDivTab[5] = {255, 256, 192, 128, 64};
 
+}  // namespace
+
 // The per-surface grip values live in one array in the original struct:
-// sliding_values[0] = simd->sliding (no contact), [1..4] = surfacegrip. We
-// materialize that layout here. Water (5) has no real entry; the original
-// reads the neighbouring struct word, so the reduced model falls back to the
-// grass grip.
+// sliding_values[0] = simd->sliding (no contact), [1..4] = surfacegrip and
+// [5] = the word at offset 190 (sliding_water), which the engine reads when a
+// wheel is on water.
 int16_t grip_value_for_surface(int surface, const CarSpec& spec) {
   switch (surface) {
     case 0:
@@ -69,10 +70,14 @@ int16_t grip_value_for_surface(int surface, const CarSpec& spec) {
       return spec.surface_grip[1];
     case kCarSurfaceIce:
       return spec.surface_grip[2];
-    default:
-      return spec.surface_grip[3];  // grass, and water-approximation
+    case kCarSurfaceGrass:
+      return spec.surface_grip[3];
+    default:  // water (5) and any unknown id read the following struct word
+      return spec.sliding_water;
   }
 }
+
+namespace {
 
 // Grip demanded by the current steering angle + forward speed.
 uint16_t grip_demanded(int16_t initial_angle, uint16_t speed_shr8) {

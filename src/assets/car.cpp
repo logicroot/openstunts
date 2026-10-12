@@ -70,6 +70,7 @@ bool CarSpec::parse_simd(const uint8_t* data, size_t size) {
 
   sliding = read_i16(data, size, 180, &ok);
   for (int i = 0; i < 4; ++i) surface_grip[i] = read_i16(data, size, 182 + i * 2, &ok);
+  sliding_water = read_i16(data, size, 190, &ok);
 
   for (int i = 0; i < 2; ++i) {
     collide_points[i].x = read_i16(data, size, 200 + i * 4, &ok);

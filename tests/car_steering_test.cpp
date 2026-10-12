@@ -134,3 +134,27 @@ TEST(cornering_sliding_steering_headings_match_reference) {
   EXPECT_EQ(cornering_heading(56, 25600), 8);
   EXPECT_EQ(cornering_heading(-56, 25600), -9);
 }
+
+// The grip word the engine reads for each surface id. Slots 1..4 are
+// surfacegrip[0..3]; slot 5 (water) is the struct word that follows
+// surfacegrip[3], not a wrap-around to the grass value.
+TEST(grip_value_for_surface_reads_sliding_values_slots) {
+  CarSpec spec;
+  spec.sliding = 7;
+  spec.surface_grip[0] = 256;
+  spec.surface_grip[1] = 192;
+  spec.surface_grip[2] = 64;
+  spec.surface_grip[3] = 128;
+  spec.sliding_water = 0;
+
+  EXPECT_EQ(grip_value_for_surface(0, spec), 7);    // airborne: sliding
+  EXPECT_EQ(grip_value_for_surface(kCarSurfacePaved, spec), 256);
+  EXPECT_EQ(grip_value_for_surface(kCarSurfaceDirt, spec), 192);
+  EXPECT_EQ(grip_value_for_surface(kCarSurfaceIce, spec), 64);
+  EXPECT_EQ(grip_value_for_surface(kCarSurfaceGrass, spec), 128);
+  EXPECT_EQ(grip_value_for_surface(kCarSurfaceWater, spec), 0);
+
+  // A non-zero water word (some future car) must be reported verbatim.
+  spec.sliding_water = 300;
+  EXPECT_EQ(grip_value_for_surface(kCarSurfaceWater, spec), 300);
+}
