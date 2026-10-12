@@ -163,13 +163,21 @@ An out-of-range slot clamps to 0. This drives the windmill sails (`wind`:
 material 113 sail vs. 118 transparent mask) and Joe's flashing sign (`rest`).
 Material 118 is a fully transparent mask and is never drawn.
 
-Car bodies (`ST<ID>.P3S`) carry riding geometry plus a special paint job `0x2D`
-that always marks the **rear light** polygons. The original never draws that
-livery: it substitutes `backlights_paint_override`, which `frame.c` sets to
-material `0x2E` while coasting and `0x2F` while the brake pedal is down
-(`shape3d.c` / `seg006.asm loc_25D3C`). Materials `0x2D`/`0x2E` resolve to
-palette 4 (dark red) and `0x2F` to palette 12 (bright red), so the lights
-brighten under braking.
+Car bodies (`ST<ID>.P3S`) are shaded exactly like the track: every paint byte is
+a material index resolved through `material_color_list`, so each body panel is
+flat-filled with the palette colour of its material. The racing bodies carry
+several paint slots (`num_paints`, 7 for the retail cars); the draw's
+`material` field selects the livery variant: `frame.c` sets it to
+`gameconfig.game_playermaterial` (default 0) for the player car and
+`gameconfig.game_opponentmaterial` for the rival. Slot 0 of `STCOUN.P3S` is the
+blue Countach livery (`car_primitive_color`, `append_car_model`).
+
+One special paint job, `0x2D`, always marks the **rear light** polygons. The
+original never draws that livery: it substitutes `backlights_paint_override`,
+which `frame.c` sets to material `0x2E` while coasting and `0x2F` while the
+brake pedal is down (`shape3d.c` / `seg006.asm loc_25D3C`). Material `0x2E`
+resolves to palette 4 (dark red) and `0x2F` to palette 12 (bright red), so the
+lights brighten under braking.
 
 ## 2D sprites (`.PVS`)
 

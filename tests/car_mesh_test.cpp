@@ -1,10 +1,12 @@
 #include <cstdint>
 #include <string>
 
+#include "assets/palette.h"
 #include "assets/shape3d.h"
 #include "core/paths.h"
 #include "tiny_test.h"
 #include "world/car_mesh.h"
+#include "world/material.h"
 #include "world/mesh_builder.h"
 #include "world/shape_mesh.h"
 
@@ -76,25 +78,67 @@ TEST(append_car_model_emits_triangles) {
 
   MeshBuilder mb;
   append_car_model(mb, lib, shape_model({0.0f, 0.0f, 0.0f}, 0.0f),
-                   glm::vec4(0.8f, 0.1f, 0.1f, 1.0f));
+                   [](uint8_t) { return glm::vec4(0.8f, 0.1f, 0.1f, 1.0f); });
   EXPECT_TRUE(mb.vertex_count() > 0);
   EXPECT_TRUE(mb.indices().size() % 3 == 0);
 }
 
-// Car paint jobs route to different fills: tyres (38) to the dark tread
-// colour, the rear lights (0x2D) to `backlight_color`, everything else to
-// `body_color`. The 0x2D sentinel is what shape3d swaps for
-// `backlights_paint_override`.
-TEST(car_primitive_color_routes_backlights) {
-  const glm::vec4 body(0.8f, 0.6f, 0.1f, 1.0f);
+// Car paint jobs are materials, resolved through the original material table
+// (material_color_list) exactly like the track. The 0x2D sentinel is not a
+// material: shape3d swaps it for `backlights_paint_override`.
+TEST(car_primitive_color_samples_material_table) {
+  Palette pal;
+  pal.rgb8[150][0] = 0;
+  pal.rgb8[150][1] = 4;
+  pal.rgb8[150][2] = 255;
   const glm::vec4 light(1.0f, 0.33f, 0.33f, 1.0f);
 
-  EXPECT_TRUE(car_primitive_color(0x2D, body, light) == light);
-  EXPECT_TRUE(car_primitive_color(44, body, light) == body);
+  // Material 51 is one of the livery body paints of the retail cars; the table
+  // maps it to palette index 150.
+  EXPECT_EQ(material_color_index(51), 150);
+  const glm::vec4 body = car_primitive_color(51, pal, light);
+  EXPECT_TRUE(body == glm::vec4(0.0f, 4.0f / 255.0f, 255.0f / 255.0f, 1.0f));
 
-  // Tyres ignore both caller colours and use the fixed dark tread colour.
-  const glm::vec4 tread = car_primitive_color(38, body, light);
-  EXPECT_TRUE(tread != body);
-  EXPECT_TRUE(tread != light);
-  EXPECT_TRUE(tread.r < 0.2f && tread.g < 0.2f && tread.b < 0.2f);
+  // The rear-light sentinel never samples the table.
+  EXPECT_TRUE(car_primitive_color(kCarBacklightPaint, pal, light) == light);
+}
+
+// `append_car_model`'s material argument picks the livery slot
+// (gameconfig.game_playermaterial), i.e. one of the shape's paint variants:
+// the retail bodies carry 7, so slot 1 paints a different bodywork colour than
+// slot 0.
+TEST(car_append_selects_livery_slot) {
+  const std::string dir = find_asset_dir();
+  if (dir.empty()) return;
+  ShapeLibrary lib;
+  if (!load_car_archive(dir, "COUN", &lib)) return;
+  if (lib.find("car1") == nullptr) return;
+  Palette pal;
+  if (!load_vga_palette(path_join(dir, "SDMAIN.PVS"), &pal)) {
+    std::printf("  (skipped: no palette)\n");
+    return;
+  }
+
+  const glm::vec4 light(0.67f, 0.0f, 0.0f, 1.0f);
+  const auto color = [&pal, light](uint8_t paint) {
+    return car_primitive_color(paint, pal, light);
+  };
+  MeshBuilder m0;
+  append_car_model(m0, lib, glm::mat4(1.0f), color, 0);
+  MeshBuilder m1;
+  append_car_model(m1, lib, glm::mat4(1.0f), color, 1);
+
+  const std::vector<Vertex>& v0 = m0.vertices();
+  const std::vector<Vertex>& v1 = m1.vertices();
+  EXPECT_EQ(v0.size(), v1.size());
+  bool differs = false;
+  if (v0.size() == v1.size()) {
+    for (size_t i = 0; i < v0.size(); ++i) {
+      if (v0[i].color != v1[i].color) {
+        differs = true;
+        break;
+      }
+    }
+  }
+  EXPECT_TRUE(differs);
 }

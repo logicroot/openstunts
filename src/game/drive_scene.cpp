@@ -45,8 +45,6 @@ constexpr float kFollowVerticalStep = 30.0f;
 
 constexpr float kAngleToRadians = 6.28318530718f / 1024.0f;
 
-constexpr glm::vec4 kPlayerCarColor(0.85f, 0.60f, 0.10f, 1.0f);
-
 // 8-bit RGB for a VGA palette index (the original draws HUD text with the
 // palette indices 15 = white and 0 = black drop shadow).
 glm::vec4 palette_color(const Palette& p, int index) {
@@ -248,7 +246,12 @@ bool DriveScene::on_enter() {
 
   auto car_lib = std::make_shared<ShapeLibrary>();
   if (!asset_dir_.empty() && world::load_car_archive(asset_dir_, "COUN", car_lib.get())) {
-    // Rear-light colour: the original swaps the backlight paint job for
+    // Bodywork is shaded with the original material table: every non-rear-light
+    // paint byte is a material index resolved through material_color_list, just
+    // like the track and scenery. The shape's livery slot is
+    // gameconfig.game_playermaterial (default 0).
+    //
+    // Rear-light colour: the original swaps paint job 0x2D for
     // `backlights_paint_override`, material 0x2E when coasting and 0x2F while
     // braking (frame.c). Those materials resolve to palette 4 / 12.
     const glm::vec4 backlight_off = have_palette ? world::material_color(0x2E, palette_)
@@ -256,8 +259,19 @@ bool DriveScene::on_enter() {
     const glm::vec4 backlight_on =
         have_palette ? world::material_color(0x2F, palette_) : glm::vec4(1.0f, 0.33f, 0.33f, 1.0f);
 
+    // Resolves one car primitive paint byte. Without SDMAIN.PVS the material
+    // table has no palette to sample, so fall back to the placeholder track
+    // colours (still routing the rear-light sentinel to `backlight`).
+    const Palette* pal = have_palette ? &palette_ : nullptr;
+    const auto car_color = [pal](const glm::vec4& backlight) -> world::PaintColorFn {
+      return [pal, backlight](uint8_t paint) -> glm::vec4 {
+        if (pal != nullptr) return world::car_primitive_color(paint, *pal, backlight);
+        return paint == world::kCarBacklightPaint ? backlight : world::track_paint_color(paint);
+      };
+    };
+
     MeshBuilder mb;
-    world::append_car_model(mb, *car_lib, glm::mat4(1.0f), kPlayerCarColor, backlight_off);
+    world::append_car_model(mb, *car_lib, glm::mat4(1.0f), car_color(backlight_off));
     const std::vector<Vertex>& verts = mb.vertices();
     if (!verts.empty()) {
       car_bounds_min_ = car_bounds_max_ = verts.front().position;
@@ -270,7 +284,7 @@ bool DriveScene::on_enter() {
     car_mesh_ = mb.to_mesh();
 
     MeshBuilder mbb;
-    world::append_car_model(mbb, *car_lib, glm::mat4(1.0f), kPlayerCarColor, backlight_on);
+    world::append_car_model(mbb, *car_lib, glm::mat4(1.0f), car_color(backlight_on));
     car_mesh_braking_ = mbb.to_mesh();
   }
   if (car_mesh_.empty()) {

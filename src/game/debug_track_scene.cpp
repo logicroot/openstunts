@@ -12,6 +12,7 @@
 #include "render/renderer.h"
 #include "render/screenshot.h"
 #include "world/car_mesh.h"
+#include "world/material.h"
 #include "world/mesh_builder.h"
 #include "world/shape_mesh.h"
 #include "world/track_mesh.h"
@@ -75,8 +76,17 @@ bool DebugTrackScene::on_enter() {
     ShapeLibrary car_lib;
     if (!asset_dir_.empty() && world::load_car_archive(asset_dir_, "COUN", &car_lib)) {
       const glm::vec3 car_pos(world::cell_center_x(7), 0.0f, world::cell_center_z(5));
-      world::append_car_model(mb, car_lib, world::shape_model(car_pos, 0.0f),
-                              glm::vec4(0.80f, 0.15f, 0.12f, 1.0f));
+      // Shade the body with the original material table (rear lights left dark).
+      const glm::vec4 backlight = have_palette ? world::material_color(0x2E, palette)
+                                               : glm::vec4(0.67f, 0.0f, 0.0f, 1.0f);
+      const Palette* pal = have_palette ? &palette : nullptr;
+      world::append_car_model(
+          mb, car_lib, world::shape_model(car_pos, 0.0f),
+          [pal, backlight](uint8_t paint) {
+            if (pal != nullptr) return world::car_primitive_color(paint, *pal, backlight);
+            return paint == world::kCarBacklightPaint ? backlight
+                                                      : world::track_paint_color(paint);
+          });
       S3D_INFO("player car: %s at cell (7,5)", car_lib.find("car1") ? "car1" : "car2");
     }
     mesh_ = mb.to_mesh();
