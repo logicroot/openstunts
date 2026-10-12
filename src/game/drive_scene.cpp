@@ -112,6 +112,25 @@ void append_segment(std::vector<Vertex>& out, float x1, float y1, float x2, floa
   }
 }
 
+// Appends one axis-aligned quad sampling the full [0,1] uv range of a texture.
+void append_textured_quad(std::vector<Vertex>& out, float x, float y, float w,
+                          float h) {
+  Vertex v;
+  v.normal = glm::vec3(0.0f, 0.0f, 1.0f);
+  v.color = glm::vec4(1.0f);
+  const float sx = x + w;
+  const float sy = y + h;
+  const glm::vec3 p[6] = {{x, y, 0.0f},  {sx, y, 0.0f},  {sx, sy, 0.0f},
+                          {x, y, 0.0f},  {sx, sy, 0.0f}, {x, sy, 0.0f}};
+  const glm::vec2 uv[6] = {{0.0f, 0.0f}, {1.0f, 0.0f}, {1.0f, 1.0f},
+                           {0.0f, 0.0f}, {1.0f, 1.0f}, {0.0f, 1.0f}};
+  for (int i = 0; i < 6; ++i) {
+    v.position = p[i];
+    v.uv = uv[i];
+    out.push_back(v);
+  }
+}
+
 void aim_at(Camera& cam, const glm::vec3& target) {
   const glm::vec3 d = glm::normalize(target - cam.position);
   cam.yaw_deg = glm::degrees(std::atan2(d.z, d.x));
@@ -335,6 +354,37 @@ bool DriveScene::on_enter() {
   if (!hud_.init()) S3D_WARN("HUD renderer initialization failed");
   hud_fg_ = have_palette ? palette_color(palette_, 15) : glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
   hud_shadow_ = have_palette ? palette_color(palette_, 0) : glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+
+  // ---- Horizon scenery -----------------------------------------------------
+  // load_skybox (seg003.asm): the track's theme archive holds the four scenery
+  // layers of the 1024-pixel panorama. The sky/ground fills use two fixed
+  // material_color_list entries.
+  sprites_.init();
+  if (have_palette && !asset_dir_.empty()) {
+    const char* theme = track_.skybox_name();
+    if (world::load_skybox(asset_dir_, theme, &skybox_)) {
+      for (int i = 0; i < world::kSkyboxLayerCount; ++i) {
+        const Sprite2D& s = skybox_.layers[static_cast<size_t>(i)].sprite;
+        std::vector<uint8_t> rgba(s.pixels.size() * 4);
+        for (size_t p = 0; p < s.pixels.size(); ++p) {
+          const uint8_t* c = palette_.rgb8[s.pixels[p]];
+          rgba[p * 4 + 0] = c[0];
+          rgba[p * 4 + 1] = c[1];
+          rgba[p * 4 + 2] = c[2];
+          rgba[p * 4 + 3] = 255;
+        }
+        skybox_textures_[i].upload_rgba(s.width, s.height, rgba.data());
+      }
+      sky_color_ = world::material_color(world::kMaterialSkyboxSky, palette_);
+      ground_color_ = world::material_color(world::kMaterialSkyboxGround, palette_);
+      S3D_INFO("skybox: %s loaded (%d layers, sky rgb %.2f/%.2f/%.2f)", theme,
+               world::kSkyboxLayerCount, sky_color_.r, sky_color_.g, sky_color_.b);
+    } else {
+      S3D_WARN("skybox: %s.PVS not found; the horizon scenery is disabled", theme);
+    }
+  } else {
+    S3D_WARN("no palette; the horizon scenery is disabled");
+  }
 
   reset_car();
   S3D_INFO("drive scene ready");
@@ -773,6 +823,60 @@ void DriveScene::build_hud(std::vector<Vertex>& verts, int width, int height,
   }
 }
 
+float DriveScene::horizon_row(const Camera& camera, int width, int height) const {
+  if (width <= 0 || height <= 0) return 0.0f;
+  const float h = static_cast<float>(height);
+  glm::vec3 level(camera.forward().x, 0.0f, camera.forward().z);
+  const float len = glm::length(level);
+  if (len < 1e-5f) return h * 0.5f;  // looking straight up or down
+  level /= len;
+  // Project the level direction (w = 0) through the camera; its screen row is
+  // where the view ray is horizontal, i.e. the horizon.
+  const glm::mat4 vp =
+      camera.projection(static_cast<float>(width) / h) * camera.view();
+  const glm::vec4 clip = vp * glm::vec4(level, 0.0f);
+  if (std::abs(clip.w) < 1e-6f) return h * 0.5f;
+  const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+  return std::clamp((1.0f - (ndc.y * 0.5f + 0.5f)) * h, 0.0f, h);
+}
+
+void DriveScene::draw_sky(const Camera& camera, float alpha, int width, int height) {
+  if (!skybox_.valid() || width <= 0 || height <= 0) return;
+  const float horizon = horizon_row(camera, width, height);
+
+  // Flat sky above the horizon and ground below. skybox_op_helper2 fills the
+  // sky only down to `horizon - min_height`, but the opaque layer blits then
+  // cover everything from `horizon - max_height` down to the horizon, so
+  // filling the whole band first yields the same pixels.
+  std::vector<Vertex> fill;
+  append_quad(fill, 0.0f, 0.0f, static_cast<float>(width), horizon, sky_color_);
+  if (horizon < static_cast<float>(height)) {
+    append_quad(fill, 0.0f, horizon, static_cast<float>(width),
+                static_cast<float>(height) - horizon, ground_color_);
+  }
+  hud_.draw(fill, width, height);
+
+  // The panorama scrolls one pixel per 1/1024-turn of camera yaw (the original
+  // feeds car_rot_x_2, which matches the car's yaw). Layers stand on the
+  // horizon and are blitted opaquely, so they are drawn after the sky fill.
+  const int yaw_units =
+      static_cast<int>(std::lround(car_yaw(alpha) / kAngleToRadians));
+
+  world::SkyboxPlacement placements[64];
+  const int n = world::skybox_layout(skybox_, width, height, horizon, yaw_units,
+                                     placements, 64);
+  std::vector<Vertex> layer_verts[world::kSkyboxLayerCount];
+  for (int i = 0; i < n; ++i) {
+    const world::SkyboxPlacement& p = placements[i];
+    append_textured_quad(layer_verts[static_cast<size_t>(p.layer)], p.x, p.y, p.width,
+                         p.height);
+  }
+  for (int i = 0; i < world::kSkyboxLayerCount; ++i) {
+    sprites_.draw(skybox_textures_[i], layer_verts[static_cast<size_t>(i)], width,
+                  height);
+  }
+}
+
 void DriveScene::render(Renderer& renderer, int width, int height) {
   const float alpha = render_alpha();
   // Interpolate the follow camera alongside the car so the two stay locked.
@@ -781,6 +885,10 @@ void DriveScene::render(Renderer& renderer, int width, int height) {
   Camera render_cam = camera_;
   render_cam.position = glm::mix(camera_prev_.position, camera_.position, alpha);
   aim_at(render_cam, car_world_position(alpha) + glm::vec3(0.0f, kFollowAimHeight, 0.0f));
+
+  // Sky and horizon panorama first, then the world overwrites them. draw_world
+  // re-enables depth testing, so the sky pass drawing with it off is safe.
+  draw_sky(render_cam, alpha, width, height);
 
   renderer.draw_world(track_mesh_, render_cam);
 

@@ -29,6 +29,7 @@ add_library(stunts3d_core STATIC
   src/render/screenshot.cpp
   src/render/texture.cpp
   src/render/hud.cpp
+  src/render/sprite_renderer.cpp
   src/platform/window.cpp
   src/platform/input.cpp
   src/assets/binary_reader.cpp
@@ -49,6 +50,7 @@ add_library(stunts3d_core STATIC
   src/world/track_elevation.cpp
   src/world/track_mesh.cpp
   src/world/car_mesh.cpp
+  src/world/skybox.cpp
   src/world/shape_mesh.cpp
   src/world/track_objects.cpp
   src/world/track_shapes.cpp

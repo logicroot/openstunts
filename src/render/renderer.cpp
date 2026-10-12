@@ -89,6 +89,10 @@ void Renderer::begin_frame(int drawable_width, int drawable_height,
 void Renderer::draw_world(const Mesh& mesh, const Camera& camera,
                           const glm::mat4& model) {
   if (mesh.empty()) return;
+  // The HUD/sky passes disable depth testing, so re-enable it here to keep the
+  // draw order-independent.
+  glEnable(GL_DEPTH_TEST);
+  glDepthMask(GL_TRUE);
   world_shader_.use();
   world_shader_.set_mat4("u_model", model);
   world_shader_.set_mat4("u_view", camera.view());

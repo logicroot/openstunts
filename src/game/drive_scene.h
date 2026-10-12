@@ -21,7 +21,10 @@
 #include "render/camera.h"
 #include "render/hud.h"
 #include "render/mesh.h"
+#include "render/sprite_renderer.h"
+#include "render/texture.h"
 #include "world/car_mesh.h"
+#include "world/skybox.h"
 #include "world/track_shapes.h"
 
 namespace s3d {
@@ -55,6 +58,16 @@ class DriveScene : public Scene {
   // or nullptr when the car is not visible; it drives the crash explosion.
   void build_hud(std::vector<Vertex>& verts, int width, int height,
                  const glm::vec4* car_rect) const;
+
+  // Draws the sky/ground fills and the horizon mountain panorama behind the
+  // world (seg003.asm skybox_op / skybox_op_helper2). No-op when the skybox
+  // asset is absent.
+  void draw_sky(const Camera& camera, float alpha, int width, int height);
+
+  // Screen row (pixels, top-left origin) of the horizon for `camera`: the
+  // projection of the world-horizontal direction, i.e. where the view ray is
+  // level. The original derives the same line from two far ground points.
+  float horizon_row(const Camera& camera, int width, int height) const;
 
   // Projects the car's local bounding box into a viewport-clipped screen
   // rectangle (left, top, right, bottom) in top-left pixel coordinates. Returns
@@ -117,6 +130,15 @@ class DriveScene : public Scene {
   HudRenderer hud_;
   glm::vec4 hud_fg_{1.0f, 1.0f, 1.0f, 1.0f};      // palette index 15
   glm::vec4 hud_shadow_{0.0f, 0.0f, 0.0f, 1.0f};  // palette index 0
+
+  // Horizon scenery (seg003.asm load_skybox): the track's theme archive plus its
+  // four mountain layers uploaded as RGBA textures, and the flat sky/ground
+  // colours read from material_color_list.
+  world::Skybox skybox_;
+  Texture skybox_textures_[world::kSkyboxLayerCount];
+  SpriteRenderer sprites_;
+  glm::vec4 sky_color_{0.55f, 0.72f, 0.92f, 1.0f};
+  glm::vec4 ground_color_{0.14f, 0.41f, 0.13f, 1.0f};
 
   std::string screenshot_path_;
   int screenshot_frame_ = 0;
