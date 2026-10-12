@@ -42,8 +42,18 @@ class DriveScene : public Scene {
   void physics_tick(const Controls& controls);
   void update_camera();
 
-  // Builds the on-screen HUD quads (race clock) in pixel coordinates.
-  void build_hud(std::vector<Vertex>& verts, int width, int height) const;
+  // Builds the in-game HUD quads (crash explosion, crack overlay, race clock,
+  // direction arrow/warning, penalty banner) in pixel coordinates.
+  // `car_rect` is the clipped car screen rectangle (left, top, right, bottom)
+  // or nullptr when the car is not visible; it drives the crash explosion.
+  void build_hud(std::vector<Vertex>& verts, int width, int height,
+                 const glm::vec4* car_rect) const;
+
+  // Projects the car's local bounding box into a viewport-clipped screen
+  // rectangle (left, top, right, bottom) in top-left pixel coordinates. Returns
+  // false when the box is behind the camera or fully off-screen.
+  bool car_screen_rect(const Camera& camera, float alpha, int width, int height,
+                       glm::vec4* rect) const;
 
   // Interpolated visual pose for the current render frame.
   float render_alpha() const;
@@ -71,6 +81,11 @@ class DriveScene : public Scene {
   int game_frame_ = 0;  // advances with the 20 Hz physics ticks
 
   Mesh car_mesh_;
+  // Player car local bounding box (car_mesh_ vertices, identity model), used to
+  // project the car to screen for the crash explosion.
+  glm::vec3 car_bounds_min_{0.0f};
+  glm::vec3 car_bounds_max_{0.0f};
+  bool car_bounds_valid_ = false;
   Camera camera_;
   Camera camera_prev_;  // camera pose at the previous physics tick
 
@@ -79,8 +94,9 @@ class DriveScene : public Scene {
   game::RaceState race_;
   BitmapFont hud_font_;   // FONTLED.FNT, the LED race-clock font
   BitmapFont text_font_;  // FONTDEF.FNT, the in-game banner/warning font
-  Sprite2D arrow_left_;   // SDGAME2.PVS "left"
-  Sprite2D arrow_right_;  // SDGAME2.PVS "righ"
+  Sprite2D arrow_left_;    // SDGAME2.PVS "left"
+  Sprite2D arrow_right_;   // SDGAME2.PVS "righ"
+  Sprite2D explosion_[3];  // SDGAME2.PVS "ex01"/"ex02"/"ex03" crash animation
   CrashOverlay crash_;    // GAME.PRE "crak"/"cinf": crashed-windscreen overlay
   int crash_end_frame_ = -1;  // game_pEndFrame: tick the collision started
   HudRenderer hud_;

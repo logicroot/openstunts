@@ -31,6 +31,8 @@ bool load_sprite2d(const std::string& pvs_path, const std::string& id,
   Sprite2D s;
   s.width = u16(chunk.data(), 0);
   s.height = u16(chunk.data(), 2);
+  s.pivot_x = u16(chunk.data(), 4);
+  s.pivot_y = u16(chunk.data(), 6);
   s.pos_x = u16(chunk.data(), 8);
   s.pos_y = u16(chunk.data(), 10);
   const size_t n = static_cast<size_t>(s.width) * static_cast<size_t>(s.height);

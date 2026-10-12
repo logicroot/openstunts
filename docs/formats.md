@@ -150,6 +150,31 @@ An out-of-range slot clamps to 0. This drives the windmill sails (`wind`:
 material 113 sail vs. 118 transparent mask) and Joe's flashing sign (`rest`).
 Material 118 is a fully transparent mask and is never drawn.
 
+## 2D sprites (`.PVS`)
+
+A `.PVS` also decompresses to a resource archive, but its chunks are flat 2D
+shapes:
+
+```
+struct SHAPE2D { u16 width, u16 height, u16 pivot_x, u16 pivot_y,
+                 u16 pos_x, u16 pos_y, u8 unk3, u8 unk4, u8 unk5, u8 unk6; };
+u8 pixels[width * height];    // palette indices; 0xFF (and any index >= 16) clear
+```
+
+`pos_x`/`pos_y` anchor the unscaled blit (`sprite_putimage`); `pivot_x`/`pivot_y`
+(`s2d_unk1`/`s2d_unk2` in the decompilation) anchor the **scaled** blit:
+`shape_op_explosion` places that pixel on the caller's centre point, so it is the
+sprite's pivot in authored pixels.
+
+`SDGAME2.PVS` (7 chunks, `ex01 ex02 ex03 left righ !cg0 !eg0`) holds the HUD 2D
+graphics (`seg003.asm load_sdgame2_shapes`):
+
+* `left` / `righ` (24×15): the direction arrows, drawn unscaled at screen centre.
+* `ex01` (32×19), `ex02` (32×19), `ex03` (32×21): the crash-explosion cycle,
+  selected by `(game_frame >> 2) % 3` and scaled so its width fills the longer
+  side of the crashed car's viewport-clipped screen rectangle
+  (`frame.c` `shape_op_explosion`).
+
 ## Track assembly (`.TRK` → geometry)
 
 The 900-byte item grid and the 900-byte terrain grid address the same physical

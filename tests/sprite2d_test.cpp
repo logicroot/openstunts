@@ -71,6 +71,49 @@ TEST(sprite2d_left_arrow_points_left) {
   EXPECT_EQ(at(right, 0, 0), 0xFF);
 }
 
+TEST(sprite2d_pivot_fields) {
+  Sprite2D left, right;
+  if (!load_arrows(&left, &right)) return;
+  // SHAPE2D.s2d_unk1 / s2d_unk2 (the scaled-blit pivot). "left" stores them at
+  // byte offsets 4/6; "righ" reuses the same slot with a negative pivot_x
+  // (0xFFF0 = 65520 unsigned), which is harmless for the unscaled putimage.
+  EXPECT_EQ(left.pivot_x, 39);
+  EXPECT_EQ(left.pivot_y, 4);
+  EXPECT_EQ(right.pivot_x, 65520);
+  EXPECT_EQ(right.pivot_y, 4);
+}
+
+TEST(sprite2d_explosion_shapes) {
+  const std::string dir = find_asset_dir();
+  if (dir.empty()) {
+    std::printf("  (skipped: no Stunts asset dir found)\n");
+    return;
+  }
+  const std::string pvs = path_join(dir, "SDGAME2.PVS");
+  const char* names[3] = {"ex01", "ex02", "ex03"};
+  Sprite2D ex[3];
+  for (int i = 0; i < 3; ++i) {
+    if (!load_sprite2d(pvs, names[i], &ex[i])) {
+      std::printf("  (skipped: SDGAME2.PVS explosion shapes not found)\n");
+      return;
+    }
+    EXPECT_TRUE(ex[i].valid());
+  }
+  // The three-frame crash explosion cycle (frame.c shape_op_explosion).
+  EXPECT_EQ(ex[0].width, 32);
+  EXPECT_EQ(ex[0].height, 19);
+  EXPECT_EQ(ex[1].width, 32);
+  EXPECT_EQ(ex[1].height, 19);
+  EXPECT_EQ(ex[2].width, 32);
+  EXPECT_EQ(ex[2].height, 21);
+  EXPECT_EQ(ex[0].pivot_x, 14);
+  EXPECT_EQ(ex[0].pivot_y, 10);
+  EXPECT_EQ(ex[1].pivot_x, 13);
+  EXPECT_EQ(ex[1].pivot_y, 10);
+  EXPECT_EQ(ex[2].pivot_x, 13);
+  EXPECT_EQ(ex[2].pivot_y, 10);
+}
+
 TEST(sprite2d_missing_asset_returns_false) {
   Sprite2D s;
   EXPECT_TRUE(!load_sprite2d("/nonexistent/SDGAME2.PVS", "left", &s));

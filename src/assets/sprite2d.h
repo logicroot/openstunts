@@ -24,6 +24,11 @@ namespace s3d {
 struct Sprite2D {
   int width = 0;
   int height = 0;
+  // SHAPE2D.s2d_unk1/s2d_unk2. Used as the pixel-space anchor for the scaled
+  // blit (shape_op_explosion places this pixel at the caller's centre), so they
+  // are the sprite's pivot in authored pixels.
+  int pivot_x = 0;
+  int pivot_y = 0;
   int pos_x = 0;  // SHAPE2D.s2d_pos_x (top-left, the no-arg sprite_putimage anchor)
   int pos_y = 0;  // SHAPE2D.s2d_pos_y
   std::vector<uint8_t> pixels;  // width * height palette indices (0xFF clear)

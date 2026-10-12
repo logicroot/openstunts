@@ -249,6 +249,15 @@ bool DriveScene::on_enter() {
   if (!asset_dir_.empty() && world::load_car_archive(asset_dir_, "COUN", car_lib.get())) {
     MeshBuilder mb;
     world::append_car_model(mb, *car_lib, glm::mat4(1.0f), kPlayerCarColor);
+    const std::vector<Vertex>& verts = mb.vertices();
+    if (!verts.empty()) {
+      car_bounds_min_ = car_bounds_max_ = verts.front().position;
+      for (const Vertex& v : verts) {
+        car_bounds_min_ = glm::min(car_bounds_min_, v.position);
+        car_bounds_max_ = glm::max(car_bounds_max_, v.position);
+      }
+      car_bounds_valid_ = true;
+    }
     car_mesh_ = mb.to_mesh();
   }
   if (car_mesh_.empty()) {
@@ -310,6 +319,19 @@ bool DriveScene::on_enter() {
       S3D_INFO("direction arrows loaded (%dx%d)", arrow_left_.width, arrow_left_.height);
     } else {
       S3D_WARN("SDGAME2.PVS arrows not found; the direction arrow is disabled");
+    }
+    // The crash explosion animation, cycled one shape per 4 frames while the car
+    // is crashed (frame.c shape_op_explosion).
+    const char* ex_names[3] = {"ex01", "ex02", "ex03"};
+    int ex_loaded = 0;
+    for (int i = 0; i < 3; ++i) {
+      if (load_sprite2d(sprites, ex_names[i], &explosion_[i])) ++ex_loaded;
+    }
+    if (ex_loaded == 3) {
+      S3D_INFO("crash explosion sprites loaded (%dx%d)", explosion_[0].width,
+               explosion_[0].height);
+    } else {
+      S3D_WARN("SDGAME2.PVS explosion sprites not found; the crash explosion is disabled");
     }
     // The crashed-windscreen pattern (seg003.asm init_crak) lives in GAME.PRE.
     if (crash_.load_from_game_pre(path_join(asset_dir_, "GAME.PRE"))) {
@@ -525,8 +547,61 @@ glm::mat4 DriveScene::car_model_matrix(float alpha) const {
   return model;
 }
 
-void DriveScene::build_hud(std::vector<Vertex>& verts, int width, int height) const {
+bool DriveScene::car_screen_rect(const Camera& camera, float alpha, int width,
+                                 int height, glm::vec4* rect) const {
+  if (!car_bounds_valid_ || width <= 0 || height <= 0) return false;
+  const float aspect = static_cast<float>(width) / static_cast<float>(height);
+  const glm::mat4 mvp =
+      camera.projection(aspect) * camera.view() * car_model_matrix(alpha);
+
+  glm::vec2 lo(1e30f), hi(-1e30f);
+  for (int i = 0; i < 8; ++i) {
+    const glm::vec3 p((i & 1) ? car_bounds_max_.x : car_bounds_min_.x,
+                      (i & 2) ? car_bounds_max_.y : car_bounds_min_.y,
+                      (i & 4) ? car_bounds_max_.z : car_bounds_min_.z);
+    const glm::vec4 clip = mvp * glm::vec4(p, 1.0f);
+    if (clip.w <= 1e-3f) return false;  // behind the camera
+    const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+    const glm::vec2 s((ndc.x * 0.5f + 0.5f) * static_cast<float>(width),
+                      (1.0f - (ndc.y * 0.5f + 0.5f)) * static_cast<float>(height));
+    lo = glm::min(lo, s);
+    hi = glm::max(hi, s);
+  }
+
+  // Clip to the viewport (rect_intersect in the original clipped the car rect to
+  // the windshield/viewport before the explosion picked its centre and size).
+  const float left = std::max(lo.x, 0.0f);
+  const float top = std::max(lo.y, 0.0f);
+  const float right = std::min(hi.x, static_cast<float>(width));
+  const float bottom = std::min(hi.y, static_cast<float>(height));
+  if (right <= left || bottom <= top) return false;
+  *rect = glm::vec4(left, top, right, bottom);
+  return true;
+}
+
+void DriveScene::build_hud(std::vector<Vertex>& verts, int width, int height,
+                           const glm::vec4* car_rect) const {
   const int scale = std::max(1, height / 200);
+
+  // Crash explosion (frame.c shape_op_explosion): a crashed car that is still on
+  // screen blinks through ex01/ex02/ex03, one shape per 4 game frames, scaled so
+  // its width fills the longer side of the (viewport-clipped) car rectangle. The
+  // sprite's pivot pixel lands on the rectangle centre. Drawn first, before the
+  // crack overlay and the in-game text (frame.c order).
+  if (car_.car_crashBmpFlag == physics::kCrashEventCollision && car_rect != nullptr) {
+    const int di = (game_frame_ >> 2) % 3;
+    const Sprite2D& ex = explosion_[di];
+    if (ex.valid()) {
+      const float left = car_rect->x, top = car_rect->y;
+      const float right = car_rect->z, bottom = car_rect->w;
+      const float idx = std::max(right - left, bottom - top);
+      const float cx = (left + right) * 0.5f;
+      const float cy = (top + bottom) * 0.5f;
+      const float pix = idx / static_cast<float>(ex.width);
+      append_sprite(verts, ex, palette_, cx - static_cast<float>(ex.pivot_x) * pix,
+                    cy - static_cast<float>(ex.pivot_y) * pix, pix);
+    }
+  }
 
   // Crashed-windscreen overlay (seg003.asm init_crak). The original draws it
   // before the in-game text (frame.c init_crak precedes draw_ingame_text). The
@@ -626,8 +701,12 @@ void DriveScene::render(Renderer& renderer, int width, int height) {
     renderer.draw_world(car_mesh_, render_cam, car_model_matrix(alpha));
   }
 
+  glm::vec4 car_rect;
+  const bool has_car_rect =
+      car_screen_rect(render_cam, alpha, width, height, &car_rect);
+
   std::vector<Vertex> hud;
-  build_hud(hud, width, height);
+  build_hud(hud, width, height, has_car_rect ? &car_rect : nullptr);
   hud_.draw(hud, width, height);
 
   ++frame_index_;
