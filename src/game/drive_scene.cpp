@@ -20,6 +20,7 @@
 #include "render/renderer.h"
 #include "render/screenshot.h"
 #include "world/car_mesh.h"
+#include "world/material.h"
 #include "world/mesh_builder.h"
 #include "world/shape_mesh.h"
 #include "world/track_elevation.h"
@@ -426,10 +427,11 @@ void DriveScene::physics_tick(const Controls& controls) {
   const auto sampler = [this](float wx, float wz) { return ground_sample(track_, wx, wz); };
   physics::step_car_motion(&car_, spec_, physics::kGameFrameRateNormal, sampler, &collision_);
 
-  // game_pEndFrame (statecrs.c loc_19760): the tick the collision started. It is
-  // set once, on the frame car_crashBmpFlag transitions to the crash state, and
-  // is the animation origin for the cracked-windscreen overlay (init_crak).
-  if (car_.car_crashBmpFlag == physics::kCrashEventCollision && crash_end_frame_ < 0) {
+  // game_pEndFrame (statecrs.c loc_19760): the tick the crash started. It is set
+  // once, on the frame car_crashBmpFlag transitions from 0 to any crash state,
+  // and is the animation origin for the cracked-windscreen (init_crak) and
+  // sinking (do_sinking) overlays.
+  if (car_.car_crashBmpFlag != physics::kCrashEventNone && crash_end_frame_ < 0) {
     crash_end_frame_ = game_frame_;
   }
 
@@ -626,6 +628,21 @@ void DriveScene::build_hud(std::vector<Vertex>& verts, int width, int height,
       append_segment(verts, x1, y1 - s, x2, y2 - s, s, hud_shadow_);
       append_segment(verts, x1, y1 + s, x2, y2 + s, s, hud_shadow_);
       append_segment(verts, x1, y1, x2, y2, s, hud_fg_);
+    }
+  }
+
+  // Water-crash sinking overlay (seg003.asm do_sinking, frame.c loc_1162): while
+  // car_crashBmpFlag == 2 the view floods from the bottom with the skybox water
+  // colour. The fill grows linearly to the full view height over
+  // framespersec << 2 game frames (the same slot as the crack overlay above:
+  // frame.c picks init_crak for flag 1 and do_sinking for flag 2).
+  if (car_.car_crashBmpFlag == physics::kCrashEventWater && crash_end_frame_ >= 0) {
+    const int framecount = std::max(0, game_frame_ - crash_end_frame_);
+    const int fill = sinking_fill_height(framecount, height, physics::kGameFrameRateNormal);
+    if (fill > 0) {
+      append_quad(verts, 0.0f, static_cast<float>(height - fill),
+                  static_cast<float>(width), static_cast<float>(fill),
+                  world::material_color(world::kMaterialSkyboxWater, palette_));
     }
   }
 

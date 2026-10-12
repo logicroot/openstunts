@@ -23,6 +23,17 @@ namespace s3d::world {
 // Number of entries in material_color_list.
 inline constexpr int kMaterialCount = 129;
 
+// load_skybox (seg003.asm loc_1D88E) reads three fixed colours straight out of
+// material_color_list, indexed by byte offset (each entry is a word, so the
+// element index is offset / 2):
+//   sky    = element 0x11 (offset 0x22)
+//   ground = element 0x10 (offset 0x20)
+//   water  = element 0x64 (offset 0xC8)
+// Water is the fill colour of the sinking crash overlay (do_sinking).
+inline constexpr uint8_t kMaterialSkyboxSky = 0x11;
+inline constexpr uint8_t kMaterialSkyboxGround = 0x10;
+inline constexpr uint8_t kMaterialSkyboxWater = 0x64;
+
 // VGA palette index for `material` (0..kMaterialCount-1). Out-of-range values
 // fall back to 0 (black), matching a zero-initialised table read.
 uint8_t material_color_index(uint8_t material);

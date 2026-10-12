@@ -42,8 +42,8 @@ class DriveScene : public Scene {
   void physics_tick(const Controls& controls);
   void update_camera();
 
-  // Builds the in-game HUD quads (crash explosion, crack overlay, race clock,
-  // direction arrow/warning, penalty banner) in pixel coordinates.
+  // Builds the in-game HUD quads (crash explosion, crack/sinking overlay, race
+  // clock, direction arrow/warning, penalty banner) in pixel coordinates.
   // `car_rect` is the clipped car screen rectangle (left, top, right, bottom)
   // or nullptr when the car is not visible; it drives the crash explosion.
   void build_hud(std::vector<Vertex>& verts, int width, int height,
@@ -98,7 +98,7 @@ class DriveScene : public Scene {
   Sprite2D arrow_right_;   // SDGAME2.PVS "righ"
   Sprite2D explosion_[3];  // SDGAME2.PVS "ex01"/"ex02"/"ex03" crash animation
   CrashOverlay crash_;    // GAME.PRE "crak"/"cinf": crashed-windscreen overlay
-  int crash_end_frame_ = -1;  // game_pEndFrame: tick the collision started
+  int crash_end_frame_ = -1;  // game_pEndFrame: tick the crash started (any flag)
   HudRenderer hud_;
   glm::vec4 hud_fg_{1.0f, 1.0f, 1.0f, 1.0f};      // palette index 15
   glm::vec4 hud_shadow_{0.0f, 0.0f, 0.0f, 1.0f};  // palette index 0

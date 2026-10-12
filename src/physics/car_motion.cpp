@@ -489,6 +489,22 @@ void step_car_motion(CarState* car, const CarSpec& spec, int frames_per_sec,
   car->car_sumSurfRearWheels = static_cast<int8_t>(rear_surfaces);
   car->car_sumSurfAllWheels = static_cast<int8_t>(front_surfaces + rear_surfaces);
 
+  // Water crash (stateply.c loc_15163, player_op): once every wheel rides the
+  // water surface the car enters the sinking crash state. update_crash_state
+  // early-returns when a flag is already set, so only a healthy car transitions
+  // (a same-tick wall crash keeps flag 1). The original resolves the wall first
+  // and the water second, which this ordering matches.
+  if (car->car_crashBmpFlag == kCrashEventNone) {
+    bool all_water = true;
+    for (int i = 0; i < kCarWheelCount; ++i) {
+      if (car->car_surfaceWhl[i] != kCarSurfaceWater) {
+        all_water = false;
+        break;
+      }
+    }
+    if (all_water) car->car_crashBmpFlag = kCrashEventWater;
+  }
+
   // ---- Suspension: lift each wheel to its body-attachment point ------------
   for (int i = 0; i < kCarWheelCount; ++i) {
     fixed::Vec3 contact_position{static_cast<int16_t>(current[i].x >> kWorldToLongShift),

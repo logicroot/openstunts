@@ -66,4 +66,15 @@ int CrashOverlay::visible_segments(int framecount, int frames_per_sec) const {
   return segment_counts_[static_cast<size_t>(s)];
 }
 
+int sinking_fill_height(int framecount, int height, int frames_per_sec) {
+  // seg003.asm do_sinking: di = framespersec << 2; the frame count is clamped to
+  // di and the fill is (framecount * height) / di.
+  const int span = frames_per_sec << 2;
+  if (span <= 0) return 0;
+  int frame = framecount;
+  if (frame > span) frame = span;
+  if (frame < 0) frame = 0;
+  return frame * height / span;
+}
+
 }  // namespace s3d

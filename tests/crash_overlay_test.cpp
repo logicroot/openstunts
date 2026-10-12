@@ -69,6 +69,22 @@ TEST(crash_overlay_stage_progression) {
   EXPECT_EQ(ov.visible_segments(1000, 20), 77);
 }
 
+// do_sinking (seg003.asm): the water fill grows from 0 to the view height over
+// framespersec << 2 frames. At 20 Hz the span is 80 frames.
+TEST(sinking_fill_height_progression) {
+  EXPECT_EQ(sinking_fill_height(0, 200, 20), 0);
+  EXPECT_EQ(sinking_fill_height(1, 200, 20), 200 * 1 / 80);    // 2
+  EXPECT_EQ(sinking_fill_height(20, 200, 20), 200 * 20 / 80);  // 50
+  EXPECT_EQ(sinking_fill_height(80, 200, 20), 200);            // full
+  // Clamped past the span, and at 10 Hz the span is 40.
+  EXPECT_EQ(sinking_fill_height(1000, 200, 20), 200);
+  EXPECT_EQ(sinking_fill_height(40, 200, 10), 200);
+  EXPECT_EQ(sinking_fill_height(20, 200, 10), 200 * 20 / 40);  // 100
+  // Negative frame counts and non-positive rates are guarded.
+  EXPECT_EQ(sinking_fill_height(-5, 200, 20), 0);
+  EXPECT_EQ(sinking_fill_height(10, 200, 0), 0);
+}
+
 TEST(crash_overlay_rejects_malformed_chunks) {
   CrashOverlay ov;
   EXPECT_TRUE(!ov.decode(make_crak(4), {}));              // no cinf

@@ -35,6 +35,14 @@ GroundSample flat_paved_world(float, float wz) {
   return g;
 }
 
+GroundSample flat_water_world(float, float wz) {
+  (void)wz;
+  GroundSample g;
+  g.height = kGroundHeight;
+  g.surface = kCarSurfaceWater;
+  return g;
+}
+
 CarSpec test_spec() {
   CarSpec spec;
   spec.num_gears = 6;
@@ -116,6 +124,35 @@ TEST(motion_rest_position_is_stable) {
     EXPECT_EQ(car.car_surfaceWhl[i], kCarSurfacePaved);
   }
   EXPECT_EQ(car.car_sumSurfAllWheels, 4);
+}
+
+// Water crash (stateply.c loc_15163): every wheel on surface 5 (water) puts the
+// car in the sinking crash state; a healthy car on paved does not, and an
+// existing crash flag is never overwritten by the water check.
+TEST(motion_all_wheels_on_water_enters_sinking_state) {
+  CarSpec spec = test_spec();
+  CarState car = parked_car(spec);
+  EXPECT_EQ(car.car_crashBmpFlag, kCrashEventNone);
+  step_car_motion(&car, spec, kGameFrameRateNormal, flat_water_world);
+  for (int i = 0; i < kCarWheelCount; ++i) {
+    EXPECT_EQ(car.car_surfaceWhl[i], kCarSurfaceWater);
+  }
+  EXPECT_EQ(car.car_crashBmpFlag, kCrashEventWater);
+}
+
+TEST(motion_paved_does_not_enter_sinking_state) {
+  CarSpec spec = test_spec();
+  CarState car = parked_car(spec);
+  step_car_motion(&car, spec, kGameFrameRateNormal, flat_paved_world);
+  EXPECT_EQ(car.car_crashBmpFlag, kCrashEventNone);
+}
+
+TEST(motion_water_does_not_override_existing_crash) {
+  CarSpec spec = test_spec();
+  CarState car = parked_car(spec);
+  car.car_crashBmpFlag = kCrashEventCollision;
+  step_car_motion(&car, spec, kGameFrameRateNormal, flat_water_world);
+  EXPECT_EQ(car.car_crashBmpFlag, kCrashEventCollision);
 }
 
 TEST(motion_forward_travel_moves_along_plus_z) {

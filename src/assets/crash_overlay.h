@@ -57,4 +57,16 @@ class CrashOverlay {
   std::vector<uint16_t> segment_counts_;
 };
 
+// do_sinking's fill height (seg003.asm do_sinking, frame.c loc_1162). When the
+// player car is in the water crash state (car_crashBmpFlag == 2) the original
+// floods the view from the bottom with skybox_wat_color: a rect [0, 320] wide
+// whose height grows from 0 to `height` over `framespersec << 2` game frames.
+//
+//   span = frames_per_sec << 2
+//   fill = min(framecount, span) * height / span
+//
+// Returns 0 when frames_per_sec is non-positive (span == 0); a negative
+// framecount clamps to 0 (game_frame - game_pEndFrame is always >= 0).
+int sinking_fill_height(int framecount, int height, int frames_per_sec);
+
 }  // namespace s3d

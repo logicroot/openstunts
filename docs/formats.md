@@ -118,6 +118,19 @@ struct CRAK {                    // "crak": 8-byte crack segments
 stage_count - 1)]` segments, each as a white 1px line with a black edge 1px
 above and below; the y coordinates scale with the view height / 200.
 
+The water crash (`car_crashBmpFlag == 2`) uses `do_sinking` instead: a rect
+`[0, 320] x [bottom - fill, bottom]` filled with `skybox_wat_color`, where
+
+```
+span = framespersec << 2                       // 80 at 20 Hz
+fill = min(frame, span) * clip_height / span   // grows 0 -> clip_height
+```
+
+`skybox_wat_color` comes from `material_color_list` at byte offset `0xC8`
+(element `0x64`, because the table stores words): palette index 136 (blue).
+`load_skybox` (seg003.asm loc_1D88E) reads the sky and ground colours from the
+same table at element `0x11` and `0x10`.
+
 ## Palettes
 
 The VGA palette lives in `SDMAIN.PVS` as resource `!pal` (784 bytes): a 16-byte
