@@ -195,6 +195,17 @@ u8 pixels[width * height];    // palette indices; 0xFF (and any index >= 16) cle
 `shape_op_explosion` places that pixel on the caller's centre point, so it is the
 sprite's pivot in authored pixels.
 
+**Flip flag.** A payload is frequently stored *transposed* (column-major) and is
+transposed back in place when the archive loads (`seg012.asm`
+`file_unflip_shape2d`; `shape2d.c:file_unflip_shape2d`). The variant is
+`unk5 >> 4` (1 = plain transpose, 2 = transpose with the stored columns split
+into two interleaved halves, 3 = a third interleaved variant) and is only
+honoured when `unk6 & 0xF0 == 0`; 0 means "stored as-is". Both flags are
+per-shape, so e.g. in `STDBVETT.PVS` the digit glyphs `dig0/dig1/dig4/dig8`
+are flipped while `dig2/dig3/dig5/dig6/dig7/dig9` are not. Skipping the
+unflip renders those shapes as diagonal noise; `load_sprite2d` applies it so
+every caller sees the upright bitmap the original blits.
+
 `SDGAME2.PVS` (7 chunks, `ex01 ex02 ex03 left righ !cg0 !eg0`) holds the HUD 2D
 graphics (`seg003.asm load_sdgame2_shapes`):
 

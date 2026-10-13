@@ -3,6 +3,7 @@
 // outline, grey edge, white fill and 0xFF clear background. Data lives in the
 // Stunts asset directory, so the tests skip cleanly when it is absent.
 
+#include <algorithm>
 #include <string>
 
 #include "assets/sprite2d.h"
@@ -120,4 +121,83 @@ TEST(sprite2d_missing_asset_returns_false) {
   const std::string dir = find_asset_dir();
   if (dir.empty()) return;
   EXPECT_TRUE(!load_sprite2d(path_join(dir, "SDGAME2.PVS"), "nope", &s));
+}
+
+// A .PVS SHAPE2D payload is frequently stored transposed and is transposed back
+// on load (seg012.asm file_unflip_shape2d). unk5's high nibble selects the
+// variant; unk6's high nibble, when set, suppresses the transform.
+TEST(sprite2d_unflip_type1_is_a_transpose) {
+  const int w = 3, h = 4;
+  const uint8_t stored[12] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+  uint8_t px[12];
+  std::copy(stored, stored + 12, px);
+  unflip_shape2d(px, w, h, 0x14, 0x08);  // type 1
+  const uint8_t want[12] = {0, 4, 8, 1, 5, 9, 2, 6, 10, 3, 7, 11};
+  for (int i = 0; i < 12; ++i) EXPECT_EQ(px[i], want[i]);
+  // On a square shape the transpose is its own inverse.
+  const uint8_t sq[9] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
+  uint8_t px2[9];
+  std::copy(sq, sq + 9, px2);
+  unflip_shape2d(px2, 3, 3, 0x14, 0x08);
+  unflip_shape2d(px2, 3, 3, 0x14, 0x08);
+  for (int i = 0; i < 9; ++i) EXPECT_EQ(px2[i], sq[i]);
+}
+
+TEST(sprite2d_unflip_type2_splits_stored_columns) {
+  const int w = 3, h = 4;
+  const uint8_t stored[12] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+  uint8_t px[12];
+  std::copy(stored, stored + 12, px);
+  unflip_shape2d(px, w, h, 0x24, 0x08);  // type 2 (VETT ins2/gbox)
+  const uint8_t want[12] = {0, 4, 8, 2, 6, 10, 1, 5, 9, 3, 7, 11};
+  for (int i = 0; i < 12; ++i) EXPECT_EQ(px[i], want[i]);
+}
+
+TEST(sprite2d_unflip_identity_cases) {
+  const int w = 3, h = 4;
+  const uint8_t stored[12] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+  uint8_t px[12];
+  std::copy(stored, stored + 12, px);
+  unflip_shape2d(px, w, h, 0x04, 0x08);  // type 0: stored as-is
+  for (int i = 0; i < 12; ++i) EXPECT_EQ(px[i], stored[i]);
+  unflip_shape2d(px, w, h, 0x14, 0x28);  // unk6 high nibble set: skip the flip
+  for (int i = 0; i < 12; ++i) EXPECT_EQ(px[i], stored[i]);
+}
+
+// VETT's digital-speedometer font mixes orientations: dig0/dig1/dig4/dig8 carry
+// the type-1 flip while the others do not. Both must decode to an upright glyph.
+TEST(sprite2d_stdb_digits_follow_flip_flag) {
+  const std::string dir = find_asset_dir();
+  if (dir.empty()) {
+    std::printf("  (skipped: no Stunts asset dir found)\n");
+    return;
+  }
+  const std::string pvs = path_join(dir, "STDBVETT.PVS");
+  Sprite2D d0, d2;
+  if (!load_sprite2d(pvs, "dig0", &d0) || !load_sprite2d(pvs, "dig2", &d2)) {
+    std::printf("  (skipped: STDBVETT.PVS digits not found)\n");
+    return;
+  }
+  EXPECT_EQ(d0.width, 8);
+  EXPECT_EQ(d0.height, 7);
+  auto at = [](const Sprite2D& s, int x, int y) {
+    return s.pixels[static_cast<size_t>(y) * s.width + x];
+  };
+  // dig0 is flipped: the upright "0" is a ring, so the outline columns are set
+  // and the outer corners are background (index 0). The stored (transposed)
+  // payload has none of these properties.
+  EXPECT_EQ(at(d0, 0, 0), 0);
+  EXPECT_EQ(at(d0, 7, 0), 0);
+  EXPECT_TRUE(at(d0, 1, 0) != 0);
+  EXPECT_TRUE(at(d0, 4, 0) != 0);
+  EXPECT_TRUE(at(d0, 0, 1) != 0);
+  EXPECT_TRUE(at(d0, 5, 1) != 0);
+  EXPECT_TRUE(at(d0, 0, 4) != 0);
+  EXPECT_TRUE(at(d0, 5, 4) != 0);
+  EXPECT_TRUE(at(d0, 1, 6) != 0);
+  EXPECT_TRUE(at(d0, 4, 6) != 0);
+  // dig2 has no flip flag but reads as an upright "2" either way.
+  EXPECT_EQ(at(d2, 1, 0), at(d0, 1, 0));
+  EXPECT_EQ(at(d2, 0, 4), at(d0, 0, 4));
+  EXPECT_EQ(d2.height, 7);
 }

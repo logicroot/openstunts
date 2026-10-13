@@ -44,4 +44,18 @@ struct Sprite2D {
 bool load_sprite2d(const std::string& pvs_path, const std::string& id,
                    Sprite2D* out);
 
+// Applies the SHAPE2D "unflip" transform to a decoded pixel payload in place.
+//
+// A .PVS shape is frequently stored transposed (column-major); the game undoes
+// this right after decompressing the archive (seg012.asm file_unflip_shape2d,
+// also shape2d.c:file_unflip_shape2d). The flip type is the high nibble of
+// s2d_unk5 (0 = stored as-is, 1..3 = a transposition variant) and is only
+// honoured when the high nibble of s2d_unk6 is clear.
+//
+// `pixels` must hold width*height entries; `unk5`/`unk6` are the shape's
+// SHAPE2D.s2d_unk5/s2d_unk6 flag bytes. A no-op (identity) when the shape is not
+// flipped.
+void unflip_shape2d(uint8_t* pixels, int width, int height, uint8_t unk5,
+                    uint8_t unk6);
+
 }  // namespace s3d
