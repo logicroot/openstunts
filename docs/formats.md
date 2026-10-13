@@ -372,6 +372,10 @@ Placement rules (`reference/restunts/src/restunts/c/frame.c`,
   * `0xFD` → owner at `(x-1, y+1)`,
   * `0xFE` → owner at `(x, y+1)`,
   * `0xFF` → owner at `(x-1, y)`.
+* **Banked loops** are elements 52..55 (physical model 26, `PHYS_BANK_CORNER`).
+  While a car is rolled past the ±4 deadband on one of these cells, `update_grip`
+  adds `car_rotate.z / 5` to the front-wheel response (`seg001.asm` loc_18228);
+  the port implements this in `car_steering.cpp` (`grip_banked_front_wheel`).
 * **Multi-tile** origin (`multi_tile` bits: 1 = +row/z, 2 = +column/x): a
   single-tile element sits at the cell centre `(x*1024+512, y*1024+512)`; a
   multi-tile element sits on the shared edge so its centred shape spans the

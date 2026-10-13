@@ -2,7 +2,9 @@
 
 #include <algorithm>
 
+#include "assets/trk.h"
 #include "physics/wrap_math.h"
+#include "world/track_objects.h"
 
 namespace s3d::physics {
 
@@ -53,6 +55,14 @@ constexpr int kSlideSpeedPenaltyShift = 1;
 
 // Speed penalty per grass wheel count: {0, 1, 2, 3, 4} wheels.
 constexpr uint16_t kGrassDecelDivTab[5] = {255, 256, 192, 128, 64};
+
+// ---- Banked-loop front-wheel correction (seg001.asm loc_18228) -------------
+// Above this roll magnitude on a banked corner the front wheels take roll / 5.
+constexpr int16_t kBankedRollThreshold = 4;
+constexpr int16_t kBankedRollDivisor = 5;
+// Element codes 0x34..0x37 (52..55) are the banked-loop corners.
+constexpr int kBankedLoopFirstItem = 52;
+constexpr int kBankedLoopLastItem = 55;
 
 }  // namespace
 
@@ -226,10 +236,30 @@ void grip_sliding_speed(CarState* car) {
   }
 }
 
+// Banked-loop front-wheel correction (seg001.asm update_grip loc_18228): while
+// the car is rolled (|car_rotate.z| > 4) and sitting on a banked-corner element
+// (codes 52..55) the front wheels take an extra roll/5 of steering response.
+void grip_banked_front_wheel(CarState* car, const Track* track) {
+  if (track == nullptr) return;
+  const int16_t roll = car->car_rotate.z;
+  if (absolute16(roll) <= kBankedRollThreshold) return;
+
+  // The original reads the high byte of each 1/64-unit position accumulator,
+  // which is the tile column/row (one tile is 65536 sub-units).
+  const int column = static_cast<uint8_t>(static_cast<uint32_t>(car->car_position.x) >> 16);
+  const int row = static_cast<uint8_t>(static_cast<uint32_t>(car->car_position.z) >> 16);
+  world::PlacedTrackObject placed;
+  if (!world::track_object_at(*track, column, row, &placed)) return;
+  if (placed.item < kBankedLoopFirstItem || placed.item > kBankedLoopLastItem) return;
+
+  car->car_front_wheel_response_angle =
+      wrap_add(car->car_front_wheel_response_angle,
+               static_cast<int16_t>(roll / kBankedRollDivisor));
+}
+
 // Player grip response: recenter, adjust slip, then banked + yaw corrections.
-// Banked-loop steering (tiles 52..55) needs the track element map; deferred.
 void grip_player_response(CarState* car, int16_t initial_angle, int16_t combined_grip,
-                          uint16_t demanded_grip, uint16_t speed_shr8) {
+                          uint16_t demanded_grip, uint16_t speed_shr8, const Track* track) {
   grip_recenter(car);
   const int16_t adjusted_angle =
       grip_slip_angle(car, initial_angle, combined_grip, demanded_grip, speed_shr8);
@@ -238,6 +268,7 @@ void grip_player_response(CarState* car, int16_t initial_angle, int16_t combined
   } else {
     car->car_front_wheel_response_angle = 0;
   }
+  grip_banked_front_wheel(car, track);
   grip_player_yaw(car, initial_angle, adjusted_angle, combined_grip, demanded_grip);
 }
 
@@ -319,7 +350,7 @@ void update_player_steering(uint8_t input_flags, CarState* car, int frames_per_s
   car->car_steeringAngle = steering_angle;
 }
 
-void update_grip(CarState* car, const CarSpec& spec) {
+void update_grip(CarState* car, const CarSpec& spec, const Track* track) {
   if (car->car_sumSurfAllWheels == kWheelContactNone) {
     car->car_front_wheel_response_angle = 0;
     car->car_slidingFlag = kCarSlidingInactive;
@@ -336,7 +367,7 @@ void update_grip(CarState* car, const CarSpec& spec) {
   car->car_surfacegrip_sum = combined_grip;
 
   // Player behaviour only; opponent steering updates are not reachable yet.
-  grip_player_response(car, initial_angle, combined_grip, demanded_grip, speed_shr8);
+  grip_player_response(car, initial_angle, combined_grip, demanded_grip, speed_shr8, track);
 
   grip_heading_offset(car);
   grip_sliding_speed(car);

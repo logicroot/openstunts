@@ -10,6 +10,10 @@
 #include "assets/car.h"
 #include "physics/car_state.h"
 
+namespace s3d {
+struct Track;
+}  // namespace s3d
+
 namespace s3d::physics {
 
 // Applies one steering tick from `input_flags` (kInputSteer{Right,Left} bits).
@@ -18,7 +22,12 @@ void update_player_steering(uint8_t input_flags, CarState* car, int frames_per_s
 
 // Grip and slip update. Called after update_car_speed, before car motion; uses
 // the wheel surface ids refreshed by the previous motion tick.
-void update_grip(CarState* car, const CarSpec& spec);
+//
+// `track` is only needed for the banked-loop front-wheel correction: while the
+// car is rolled on a banked corner (elements 52..55) the front wheels gain an
+// extra share of the roll (seg001.asm update_grip loc_18228). Pass nullptr and
+// that term is skipped.
+void update_grip(CarState* car, const CarSpec& spec, const Track* track = nullptr);
 
 // Signed arithmetic right shift on the low 16 bits (LEGACY_S16_SAR). Negative
 // (left) angles round down in magnitude, which is the original left-corner

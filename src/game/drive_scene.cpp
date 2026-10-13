@@ -674,7 +674,7 @@ void DriveScene::physics_tick(const Controls& controls) {
 
   physics::update_car_speed(input_flags, spec_, &car_, physics::kGameFrameRateNormal);
   physics::update_player_steering(input_flags, &car_, physics::kGameFrameRateNormal);
-  physics::update_grip(&car_, spec_);
+  physics::update_grip(&car_, spec_, &track_);
   const auto sampler = [this](float wx, float wz) { return ground_sample(track_, wx, wz); };
   physics::step_car_motion(&car_, spec_, physics::kGameFrameRateNormal, sampler, &collision_);
 
