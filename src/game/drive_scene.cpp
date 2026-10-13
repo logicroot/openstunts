@@ -754,6 +754,39 @@ void DriveScene::physics_tick(const Controls& controls) {
 }
 
 void DriveScene::update_camera() {
+  if (camera_mode_ == 0) {
+    // Cockpit camera (cameramode 0): original places the camera at the car's
+    // interior eye point by rotating the local offset (0, car_height-6, 0)
+    // through the inverse body rotation (-rot_z, -rot_y, -rot_x).
+    const float alpha = render_alpha();
+    const int16_t yaw256 = static_cast<int16_t>(
+        lerp_angle(display_prev_.car_rotate.x, car_.car_rotate.x, alpha));
+    const int16_t pitch256 = static_cast<int16_t>(
+        lerp_angle(display_prev_.car_rotate.y, car_.car_rotate.y, alpha));
+    const int16_t roll256 = static_cast<int16_t>(
+        lerp_angle(display_prev_.car_rotate.z, car_.car_rotate.z, alpha));
+
+    fixed::Mat3 rot_inv =
+        fixed::mat_rot_zxy(physics::wrap_negate(roll256), physics::wrap_negate(pitch256),
+                           physics::wrap_negate(yaw256), 0);
+
+    const int32_t eye_y = static_cast<int32_t>(spec_.car_height) - 6;
+    fixed::Vec3 eye_off{0, static_cast<int16_t>(eye_y), 0};
+    fixed::Vec3 eye_world_f;
+    fixed::mat_mul_vector(eye_off, rot_inv, &eye_world_f);
+
+    const glm::vec3 car_pos = car_world_position(alpha);
+    const glm::vec3 eye_pos = car_pos + glm::vec3(static_cast<float>(eye_world_f.x) / 64.0f,
+                                                   static_cast<float>(eye_world_f.y) / 64.0f,
+                                                   static_cast<float>(eye_world_f.z) / 64.0f);
+
+    camera_.position = eye_pos;
+    const glm::vec3 look = car_pos + glm::vec3(0.0f, kFollowAimHeight, 0.0f);
+    aim_at(camera_, look);
+    // Don't overwrite camera_prev_ here; the caller manages interpolation snapshots.
+    return;
+  }
+
   const glm::vec3 car_pos = car_world_position(1.0f);
   const float yaw = car_yaw(1.0f);
   // The car's nose in world space is R_y(-yaw) * +Z = (-sin, 0, cos) with the
@@ -777,6 +810,10 @@ void DriveScene::update(double dt, const Controls& controls) {
   // handle_ingame_kb_shortcuts: 'D' toggles the cockpit dashboard.
   if (controls.toggle_dashboard && dashboard_.valid()) {
     dashboard_on_ = !dashboard_on_;
+  }
+  // 'C' cycles camera modes (original).
+  if (controls.toggle_camera) {
+    camera_mode_ = (camera_mode_ + 1) % 4;
   }
 
   accumulator_ += dt;
@@ -1302,7 +1339,7 @@ void DriveScene::render(Renderer& renderer, int width, int height) {
   renderer.draw_world(animated_meshes_[phase], render_cam);
   renderer.draw_world_lines(animated_lines_[phase], render_cam);
 
-  if (!car_mesh_.empty()) {
+  if (!car_mesh_.empty() && camera_mode_ != 0) {
     const Mesh& body =
         (car_.car_is_braking != 0 && !car_mesh_braking_.empty()) ? car_mesh_braking_ : car_mesh_;
     renderer.draw_world(body, render_cam, car_model_matrix(alpha));
