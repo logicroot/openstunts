@@ -110,11 +110,10 @@ int dashboard_steer_dot_index(int16_t steering_angle, int num_points);
 void dashboard_point_at(const uint8_t* points, int index, int* out_x, int* out_y);
 
 // Screen-space rectangles for the dashboard in a view of `width` x `height`
-// pixels (top-left origin). The artwork is authored for a 320x200 frame that
-// the original displayed on a 4:3 screen, so its pixels are reproduced at that
-// aspect (5/6 as wide as tall) with the 320-wide frame centred horizontally,
-// rather than stretched to the view. `windshield_top` / `windshield_bottom`
-// delimit the band the 3D world should occupy, in pixels.
+// pixels (top-left origin). The artwork is authored for a 320x200 view, so x
+// scales with the view width and y with the view height: the panel always spans
+// the full width and the roof caps the top edge. `windshield_top` /
+// `windshield_bottom` delimit the band the 3D world should occupy, in pixels.
 struct DashboardRects {
   float roof_x;
   float roof_y;
@@ -159,8 +158,7 @@ struct DashboardRects {
   float dot_h;
   float dot_pivot_x;
   float dot_pivot_y;
-  // Authored-pixel to screen-pixel scale: x is 5/6 of y (the original 4:3
-  // pixel aspect); both are view-height driven on wide views.
+  // x scales with the view width (width / 320), y with the height (height / 200).
   float scale_x;
   float scale_y;
   float windshield_top;

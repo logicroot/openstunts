@@ -2,7 +2,6 @@
 // assets) and, when the Stunts asset directory is present, loading the player
 // car's "dash"/"roof" panels from STDACOUN.PVS (seg005.asm setup_car_shapes).
 
-#include <cmath>
 #include <string>
 
 #include "assets/sprite2d.h"
@@ -30,75 +29,55 @@ world::Dashboard synthetic_dashboard() {
   return d;
 }
 
-bool approx(float a, float b) { return std::fabs(a - b) < 0.01f; }
-
 }  // namespace
 
-// The dashboard is authored for a 320x200 frame that the original showed on a
-// 4:3 screen: an authored pixel is 5/6 as wide as it is tall and the frame is
-// centred horizontally rather than stretched across the view.
-
-TEST(dashboard_rects_four_three_view) {
+TEST(dashboard_leader_rects_authored) {
   const world::Dashboard d = synthetic_dashboard();
   world::DashboardRects r;
-  // A 4:3 view (320x240) is the reference: x maps 1:1, y maps by 240/200 = 1.2.
-  EXPECT_TRUE(world::dashboard_rects(d, 320, 240, &r));
-  EXPECT_TRUE(approx(r.scale_x, 1.0f));
-  EXPECT_TRUE(approx(r.scale_y, 1.2f));
-  EXPECT_TRUE(approx(r.roof_x, 0.0f));
-  EXPECT_TRUE(approx(r.roof_y, 0.0f));
-  EXPECT_TRUE(approx(r.roof_w, 320.0f));
-  EXPECT_TRUE(approx(r.roof_h, 10.8f));
-  EXPECT_TRUE(approx(r.dash_x, 0.0f));
-  EXPECT_TRUE(approx(r.dash_y, 156.0f));
-  EXPECT_TRUE(approx(r.dash_w, 320.0f));
-  EXPECT_TRUE(approx(r.dash_h, 84.0f));
-  EXPECT_TRUE(approx(r.windshield_top, 10.8f));
-  EXPECT_TRUE(approx(r.windshield_bottom, 156.0f));
+  EXPECT_TRUE(world::dashboard_rects(d, 320, 200, &r));
+  // At the authored 320x200 view the rectangles are the SHAPE2D positions.
+  EXPECT_EQ(r.roof_x, 0.0f);
+  EXPECT_EQ(r.roof_y, 0.0f);
+  EXPECT_EQ(r.roof_w, 320.0f);
+  EXPECT_EQ(r.roof_h, 9.0f);
+  EXPECT_EQ(r.dash_x, 0.0f);
+  EXPECT_EQ(r.dash_y, 130.0f);
+  EXPECT_EQ(r.dash_w, 320.0f);
+  EXPECT_EQ(r.dash_h, 70.0f);
+  EXPECT_EQ(r.windshield_top, 9.0f);
+  EXPECT_EQ(r.windshield_bottom, 130.0f);
 }
 
-TEST(dashboard_rects_wide_view_is_centred) {
+TEST(dashboard_rects_scale_to_view) {
   const world::Dashboard d = synthetic_dashboard();
   world::DashboardRects r;
-  // 1280x720: the 4:3 frame is 960px wide (x 3.0, y 3.6) and centred at x=160,
-  // so the panel leaves the 3D world visible down each side.
+  // x scales with the view width, y with the view height.
+  EXPECT_TRUE(world::dashboard_rects(d, 640, 400, &r));
+  EXPECT_EQ(r.roof_w, 640.0f);
+  EXPECT_EQ(r.roof_h, 18.0f);
+  EXPECT_EQ(r.dash_y, 260.0f);
+  EXPECT_EQ(r.dash_h, 140.0f);
+  EXPECT_EQ(r.windshield_top, 18.0f);
+  EXPECT_EQ(r.windshield_bottom, 260.0f);
+
   EXPECT_TRUE(world::dashboard_rects(d, 1280, 720, &r));
-  EXPECT_TRUE(approx(r.scale_x, 3.0f));
-  EXPECT_TRUE(approx(r.scale_y, 3.6f));
-  EXPECT_TRUE(approx(r.roof_x, 160.0f));
-  EXPECT_TRUE(approx(r.roof_w, 960.0f));
-  EXPECT_TRUE(approx(r.dash_x, 160.0f));
-  EXPECT_TRUE(approx(r.dash_y, 468.0f));
-  EXPECT_TRUE(approx(r.dash_w, 960.0f));
-  EXPECT_TRUE(approx(r.dash_h, 252.0f));
-  EXPECT_TRUE(approx(r.dash_y + r.dash_h, 720.0f));  // reaches the bottom edge
-  EXPECT_TRUE(approx(r.windshield_top, 32.4f));
-  EXPECT_TRUE(approx(r.windshield_bottom, 468.0f));
-
-  // Doubling the view doubles the frame; it stays centred and 4:3.
-  EXPECT_TRUE(world::dashboard_rects(d, 1920, 1080, &r));
-  EXPECT_TRUE(approx(r.scale_x, 4.5f));
-  EXPECT_TRUE(approx(r.scale_y, 5.4f));
-  EXPECT_TRUE(approx(r.dash_x, 240.0f));
-  EXPECT_TRUE(approx(r.dash_w, 1440.0f));
+  EXPECT_EQ(r.roof_w, 1280.0f);
+  EXPECT_EQ(r.roof_h, 9.0f * 3.6f);
+  EXPECT_EQ(r.dash_y, 130.0f * 3.6f);
+  EXPECT_EQ(r.dash_h, 70.0f * 3.6f);
+  EXPECT_EQ(r.windshield_bottom, 130.0f * 3.6f);
 }
 
-TEST(dashboard_rects_fits_narrow_view) {
+TEST(dashboard_rects_spans_full_width) {
   const world::Dashboard d = synthetic_dashboard();
-  world::DashboardRects r;
-  // On a 4:3 view the frame fills the width exactly (width/320 x height/200).
-  EXPECT_TRUE(world::dashboard_rects(d, 800, 600, &r));
-  EXPECT_TRUE(approx(r.scale_x, 2.5f));
-  EXPECT_TRUE(approx(r.scale_y, 3.0f));
-  EXPECT_TRUE(approx(r.dash_x, 0.0f));
-  EXPECT_TRUE(approx(r.dash_w, 800.0f));
-
-  // A tall view caps the height scale so the frame still fits horizontally.
-  EXPECT_TRUE(world::dashboard_rects(d, 600, 800, &r));
-  EXPECT_TRUE(approx(r.scale_x, 1.875f));
-  EXPECT_TRUE(approx(r.scale_y, 2.25f));
-  EXPECT_TRUE(approx(r.dash_x, 0.0f));
-  EXPECT_TRUE(approx(r.dash_w, 600.0f));
+  // The panel is authored full-width, so it must always reach both edges.
+  for (int w : {320, 640, 1024, 1280, 1920}) {
+    world::DashboardRects r;
+    EXPECT_TRUE(world::dashboard_rects(d, w, 200, &r));
+    EXPECT_EQ(r.dash_x, 0.0f);
+    EXPECT_EQ(r.dash_w, static_cast<float>(w));
+    EXPECT_EQ(r.roof_w, static_cast<float>(w));
+  }
 }
 
 TEST(dashboard_rects_wheel) {
@@ -111,24 +90,24 @@ TEST(dashboard_rects_wheel) {
     d.wheel[i].pixels.assign(184 * 32, 0);
   }
   world::DashboardRects r;
-  EXPECT_TRUE(world::dashboard_rects(d, 320, 240, &r));
+  EXPECT_TRUE(world::dashboard_rects(d, 320, 200, &r));
   EXPECT_TRUE(r.has_wheel);
-  EXPECT_TRUE(approx(r.wheel_x, 40.0f));
-  EXPECT_TRUE(approx(r.wheel_y, 201.6f));
-  EXPECT_TRUE(approx(r.wheel_w, 184.0f));
-  EXPECT_TRUE(approx(r.wheel_h, 38.4f));
+  EXPECT_EQ(r.wheel_x, 40.0f);
+  EXPECT_EQ(r.wheel_y, 168.0f);
+  EXPECT_EQ(r.wheel_w, 184.0f);
+  EXPECT_EQ(r.wheel_h, 32.0f);
 
-  EXPECT_TRUE(world::dashboard_rects(d, 1280, 720, &r));
-  EXPECT_TRUE(approx(r.wheel_x, 280.0f));
-  EXPECT_TRUE(approx(r.wheel_y, 604.8f));
-  EXPECT_TRUE(approx(r.wheel_w, 552.0f));
-  EXPECT_TRUE(approx(r.wheel_h, 115.2f));
+  EXPECT_TRUE(world::dashboard_rects(d, 640, 400, &r));
+  EXPECT_EQ(r.wheel_x, 80.0f);
+  EXPECT_EQ(r.wheel_y, 336.0f);
+  EXPECT_EQ(r.wheel_w, 368.0f);
+  EXPECT_EQ(r.wheel_h, 64.0f);
 }
 
 TEST(dashboard_rects_without_wheel) {
   const world::Dashboard d = synthetic_dashboard();
   world::DashboardRects r;
-  EXPECT_TRUE(world::dashboard_rects(d, 320, 240, &r));
+  EXPECT_TRUE(world::dashboard_rects(d, 320, 200, &r));
   EXPECT_TRUE(!r.has_wheel);
   EXPECT_EQ(r.wheel_w, 0.0f);
   EXPECT_EQ(r.wheel_h, 0.0f);
@@ -320,46 +299,45 @@ TEST(dashboard_rects_instruments_and_gear) {
   d.steer_dot.pixels.assign(8 * 4, 0);
 
   world::DashboardRects r;
-  // 320x240 (4:3): x authored 1:1, y authored * 1.2.
-  EXPECT_TRUE(world::dashboard_rects(d, 320, 240, &r));
+  EXPECT_TRUE(world::dashboard_rects(d, 320, 200, &r));
   EXPECT_TRUE(r.has_instruments);
-  EXPECT_TRUE(approx(r.instrument_x, 64.0f));
-  EXPECT_TRUE(approx(r.instrument_y, 177.6f));
-  EXPECT_TRUE(approx(r.instrument_w, 136.0f));
-  EXPECT_TRUE(approx(r.instrument_h, 46.8f));
+  EXPECT_EQ(r.instrument_x, 64.0f);
+  EXPECT_EQ(r.instrument_y, 148.0f);
+  EXPECT_EQ(r.instrument_w, 136.0f);
+  EXPECT_EQ(r.instrument_h, 39.0f);
   EXPECT_TRUE(r.has_gear_box);
-  EXPECT_TRUE(approx(r.gear_box_x, 256.0f));
-  EXPECT_TRUE(approx(r.gear_box_y, 172.8f));
-  EXPECT_TRUE(approx(r.gear_box_w, 64.0f));
-  EXPECT_TRUE(approx(r.gear_box_h, 67.2f));
+  EXPECT_EQ(r.gear_box_x, 256.0f);
+  EXPECT_EQ(r.gear_box_y, 144.0f);
+  EXPECT_EQ(r.gear_box_w, 64.0f);
+  EXPECT_EQ(r.gear_box_h, 56.0f);
   EXPECT_TRUE(r.has_knob);
-  EXPECT_TRUE(approx(r.knob_w, 24.0f));
-  EXPECT_TRUE(approx(r.knob_h, 27.6f));
+  EXPECT_EQ(r.knob_w, 24.0f);
+  EXPECT_EQ(r.knob_h, 23.0f);
   EXPECT_EQ(r.knob_pivot_x, 12.0f);
   EXPECT_EQ(r.knob_pivot_y, 11.0f);
   EXPECT_TRUE(r.has_dot);
-  EXPECT_TRUE(approx(r.dot_w, 8.0f));
-  EXPECT_TRUE(approx(r.dot_h, 4.8f));
+  EXPECT_EQ(r.dot_w, 8.0f);
+  EXPECT_EQ(r.dot_h, 4.0f);
   EXPECT_EQ(r.dot_pivot_x, 5.0f);
   EXPECT_EQ(r.dot_pivot_y, 2.0f);
-  EXPECT_TRUE(approx(r.scale_x, 1.0f));
-  EXPECT_TRUE(approx(r.scale_y, 1.2f));
+  EXPECT_EQ(r.scale_x, 1.0f);
+  EXPECT_EQ(r.scale_y, 1.0f);
 
-  // At 640x480 the rects scale by 2 in x and 2.4 in y; the pivots stay authored.
-  EXPECT_TRUE(world::dashboard_rects(d, 640, 480, &r));
-  EXPECT_TRUE(approx(r.instrument_x, 128.0f));
-  EXPECT_TRUE(approx(r.instrument_y, 355.2f));
-  EXPECT_TRUE(approx(r.instrument_w, 272.0f));
-  EXPECT_TRUE(approx(r.gear_box_x, 512.0f));
-  EXPECT_TRUE(approx(r.gear_box_y, 345.6f));
-  EXPECT_TRUE(approx(r.scale_x, 2.0f));
-  EXPECT_TRUE(approx(r.scale_y, 2.4f));
+  // At 640x400 the rects scale by 2 in both axes; the pivots stay authored.
+  EXPECT_TRUE(world::dashboard_rects(d, 640, 400, &r));
+  EXPECT_EQ(r.instrument_x, 128.0f);
+  EXPECT_EQ(r.instrument_y, 296.0f);
+  EXPECT_EQ(r.instrument_w, 272.0f);
+  EXPECT_EQ(r.gear_box_x, 512.0f);
+  EXPECT_EQ(r.gear_box_y, 288.0f);
+  EXPECT_EQ(r.scale_x, 2.0f);
+  EXPECT_EQ(r.scale_y, 2.0f);
   EXPECT_EQ(r.knob_pivot_x, 12.0f);
   EXPECT_EQ(r.dot_pivot_y, 2.0f);
 
   // Without the optional sprites the flags are false and the rects are zero.
   const world::Dashboard plain = synthetic_dashboard();
-  EXPECT_TRUE(world::dashboard_rects(plain, 320, 240, &r));
+  EXPECT_TRUE(world::dashboard_rects(plain, 320, 200, &r));
   EXPECT_TRUE(!r.has_instruments);
   EXPECT_TRUE(!r.has_gear_box);
   EXPECT_TRUE(!r.has_knob);
