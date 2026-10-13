@@ -152,6 +152,7 @@ class DriveScene : public Scene {
   // the world outside the windshield and the HUD clock moves below the roof.
   world::Dashboard dashboard_;
   Texture dashboard_textures_[2];  // [0] = dash, [1] = roof
+  Texture dashboard_wheel_textures_[3];  // "whl1"/"whl2"/"whl3"
   bool dashboard_on_ = true;
 
   std::string screenshot_path_;

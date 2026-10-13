@@ -215,14 +215,20 @@ in the original's default view (`dashb_toggle = 1`, `seg005.asm`
 | --- | --- | --- | --- |
 | `dash` | 320×70 | (0,130) | the main panel; `s2d_pos_y` is `dashbmp_y` |
 | `roof` | 320×9 | (0,0) | the cockpit frame; `s2d_height` is `roofbmpheight` |
-| `whl1`/`whl2`/`whl3` | 184×32 | (40,168) | the steering wheel (animated) |
-| `gnob`/`gbox` | | | the gear lever (animated, from `car_knob_x/y`) |
-| `ins1`/`ins2`/`ins3`, `inm1`/`inm3` | | | instrument cluster overlays |
+| `whl1`/`whl2`/`whl3` | 184×32 | (40,168) | steering wheel: turned left / centred / turned right |
+| `gbox` | 64×56 | (256,144) | the gear-box gauge (animated) |
+| `ins1`/`ins2`/`ins3`, `inm1`/`inm3` | | | speedometer/tachometer cluster and indicator masks |
+| `dast`/`dasm` | | | tachometer needle and mask (older cars only) |
+
+The gear lever (`gnob` + `dot`/`dota`/`dot1`/`dot2`) lives in the companion
+archive `STDB<car>.PVS`.
 
 The original renders the 3D world inside `rect_windshield =
 [roofbmpheight, dashbmp_y]` and composites the panel over the rest. The port
-draws `dash` and `roof` opaquely; the animated wheel/lever/gauges are not wired
-up yet.
+draws `dash`, `roof` and the steering wheel opaquely; the wheel is picked from
+`whl1`/`whl2`/`whl3` by the steering angle (`seg005.asm loc_2319D`:
+`trunc(angle/8)` against a ±10 dead zone). The gear lever and gauges are not
+wired up yet.
 
 ## Track assembly (`.TRK` → geometry)
 

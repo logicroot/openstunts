@@ -80,6 +80,39 @@ TEST(dashboard_rects_spans_full_width) {
   }
 }
 
+TEST(dashboard_rects_wheel) {
+  world::Dashboard d = synthetic_dashboard();
+  for (int i = 0; i < 3; ++i) {
+    d.wheel[i].width = 184;
+    d.wheel[i].height = 32;
+    d.wheel[i].pos_x = 40;
+    d.wheel[i].pos_y = 168;
+    d.wheel[i].pixels.assign(184 * 32, 0);
+  }
+  world::DashboardRects r;
+  EXPECT_TRUE(world::dashboard_rects(d, 320, 200, &r));
+  EXPECT_TRUE(r.has_wheel);
+  EXPECT_EQ(r.wheel_x, 40.0f);
+  EXPECT_EQ(r.wheel_y, 168.0f);
+  EXPECT_EQ(r.wheel_w, 184.0f);
+  EXPECT_EQ(r.wheel_h, 32.0f);
+
+  EXPECT_TRUE(world::dashboard_rects(d, 640, 400, &r));
+  EXPECT_EQ(r.wheel_x, 80.0f);
+  EXPECT_EQ(r.wheel_y, 336.0f);
+  EXPECT_EQ(r.wheel_w, 368.0f);
+  EXPECT_EQ(r.wheel_h, 64.0f);
+}
+
+TEST(dashboard_rects_without_wheel) {
+  const world::Dashboard d = synthetic_dashboard();
+  world::DashboardRects r;
+  EXPECT_TRUE(world::dashboard_rects(d, 320, 200, &r));
+  EXPECT_TRUE(!r.has_wheel);
+  EXPECT_EQ(r.wheel_w, 0.0f);
+  EXPECT_EQ(r.wheel_h, 0.0f);
+}
+
 TEST(dashboard_rects_rejects_invalid) {
   world::Dashboard unloaded;
   world::DashboardRects r;
@@ -128,4 +161,36 @@ TEST(dashboard_load_player_car) {
   EXPECT_EQ(d.roof.height, 9);
   EXPECT_EQ(d.dash_top(), 130);
   EXPECT_EQ(d.roof_height(), 9);
+  // The three steering-wheel sprites, all 184x32 at (40,168).
+  EXPECT_TRUE(d.wheels_loaded);
+  for (int i = 0; i < 3; ++i) {
+    EXPECT_TRUE(d.wheel[i].valid());
+    EXPECT_EQ(d.wheel[i].width, 184);
+    EXPECT_EQ(d.wheel[i].height, 32);
+    EXPECT_EQ(d.wheel[i].pos_x, 40);
+    EXPECT_EQ(d.wheel[i].pos_y, 168);
+  }
+  EXPECT_TRUE(d.any_wheel() != nullptr);
+}
+
+TEST(dashboard_wheel_index_dead_zone) {
+  // seg005.asm loc_2319D: trunc(angle/8) with a +-10 dead zone -> 0/1/2.
+  EXPECT_EQ(world::dashboard_wheel_index(0), 1);
+  EXPECT_EQ(world::dashboard_wheel_index(8), 1);
+  EXPECT_EQ(world::dashboard_wheel_index(-8), 1);
+  EXPECT_EQ(world::dashboard_wheel_index(80), 1);   // 10 -> centred
+  EXPECT_EQ(world::dashboard_wheel_index(-80), 1);
+  EXPECT_EQ(world::dashboard_wheel_index(88), 2);   // 11 -> turned right
+  EXPECT_EQ(world::dashboard_wheel_index(-88), 0);  // -11 -> turned left
+  EXPECT_EQ(world::dashboard_wheel_index(1024), 2);
+  EXPECT_EQ(world::dashboard_wheel_index(-1024), 0);
+}
+
+TEST(dashboard_wheel_index_truncates_toward_zero) {
+  // The original negates (|angle| >> 3) instead of arithmetic-shifting, so it
+  // truncates toward zero: -17 -> -2 (centred), not -3.
+  EXPECT_EQ(world::dashboard_wheel_index(-17), 1);
+  EXPECT_EQ(world::dashboard_wheel_index(-79), 1);  // 9 -> centred
+  EXPECT_EQ(world::dashboard_wheel_index(-81), 1);  // 10 -> centred
+  EXPECT_EQ(world::dashboard_wheel_index(-88), 0);  // 11 -> left
 }

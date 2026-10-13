@@ -399,18 +399,28 @@ bool DriveScene::on_enter() {
   // original shows this by default (dashb_toggle = 1 in a fresh race).
   if (have_palette && !asset_dir_.empty() &&
       world::load_dashboard(asset_dir_, kPlayerCarId, &dashboard_)) {
-    const Sprite2D* shapes[2] = {&dashboard_.dash, &dashboard_.roof};
-    for (int i = 0; i < 2; ++i) {
-      const Sprite2D& s = *shapes[i];
+    // Palette indices -> RGBA. The RLE decoder leaves skipped (transparent) runs
+    // as 0xFF; the cockpit panels are opaque, so leave those pixels clear.
+    const auto upload_sprite = [this](const Sprite2D& s, Texture* tex) {
       std::vector<uint8_t> rgba(s.pixels.size() * 4);
       for (size_t p = 0; p < s.pixels.size(); ++p) {
-        const uint8_t* c = palette_.rgb8[s.pixels[p]];
+        const uint8_t idx = s.pixels[p];
+        if (idx == 0xFF) continue;  // already zeroed
+        const uint8_t* c = palette_.rgb8[idx];
         rgba[p * 4 + 0] = c[0];
         rgba[p * 4 + 1] = c[1];
         rgba[p * 4 + 2] = c[2];
         rgba[p * 4 + 3] = 255;
       }
-      dashboard_textures_[i].upload_rgba(s.width, s.height, rgba.data());
+      tex->upload_rgba(s.width, s.height, rgba.data());
+    };
+
+    upload_sprite(dashboard_.dash, &dashboard_textures_[0]);
+    upload_sprite(dashboard_.roof, &dashboard_textures_[1]);
+    for (int i = 0; i < 3; ++i) {
+      if (dashboard_.wheel[i].valid()) {
+        upload_sprite(dashboard_.wheel[i], &dashboard_wheel_textures_[i]);
+      }
     }
   } else if (have_palette) {
     S3D_WARN("dashboard: STDACOUN.PVS not found; the cockpit panel is disabled");
@@ -922,10 +932,21 @@ void DriveScene::draw_dashboard(int width, int height) {
   if (!world::dashboard_rects(dashboard_, width, height, &r)) return;
 
   // Drawn last so the opaque panel hides the world and HUD outside the
-  // windshield (the original composites the dashboard over the 3D band).
+  // windshield (the original composites the dashboard over the 3D band). The
+  // original draws roof, dash, then the steering wheel (seg005.asm
+  // setup_car_shapes loc_22F76), the wheel over the dash's black cut-out.
   std::vector<Vertex> verts;
   append_textured_quad(verts, r.dash_x, r.dash_y, r.dash_w, r.dash_h);
   sprites_.draw(dashboard_textures_[0], verts, width, height);
+
+  if (r.has_wheel) {
+    const int index = world::dashboard_wheel_index(car_.car_steeringAngle);
+    if (dashboard_.wheel[index].valid()) {
+      verts.clear();
+      append_textured_quad(verts, r.wheel_x, r.wheel_y, r.wheel_w, r.wheel_h);
+      sprites_.draw(dashboard_wheel_textures_[index], verts, width, height);
+    }
+  }
 
   verts.clear();
   append_textured_quad(verts, r.roof_x, r.roof_y, r.roof_w, r.roof_h);

@@ -10,13 +10,15 @@
 //                              `roofbmpheight`
 //
 // The original sets rect_windshield = [roofbmpheight, dashbmp_y], renders the
-// 3D world inside that band and composites the panel over the rest. The animated
-// pieces ("whl1/2/3" steering wheel, "gnob"/"gbox" gear lever, "ins*"/"inm*"
+// 3D world inside that band and composites the panel over the rest. The steering
+// wheel is chosen from three static sprites by the steering angle (loc_2319D);
+// the remaining animated pieces ("gnob"/"gbox" gear lever, "ins*"/"inm*"
 // instruments and, on older cars, the "dast"/"dasm" tachometer needle and mask)
 // are not drawn yet.
 //
 // Reference: seg005.asm setup_car_shapes, loop_game and c/restunts.c run_game.
 
+#include <cstdint>
 #include <string>
 
 #include "assets/sprite2d.h"
@@ -24,11 +26,21 @@
 namespace s3d::world {
 
 struct Dashboard {
-  Sprite2D roof;  // "roof" (top strip); height = roofbmpheight
-  Sprite2D dash;  // "dash" (bottom panel); pos_y = dashbmp_y
+  Sprite2D roof;      // "roof" (top strip); height = roofbmpheight
+  Sprite2D dash;      // "dash" (bottom panel); pos_y = dashbmp_y
+  Sprite2D wheel[3];  // "whl1"/"whl2"/"whl3" = turned-left / centred / turned-right
+  bool wheels_loaded = false;
   bool loaded = false;
 
   bool valid() const { return loaded; }
+
+  // The first valid steering-wheel sprite, or nullptr when the archive has none.
+  const Sprite2D* any_wheel() const {
+    for (const Sprite2D& w : wheel) {
+      if (w.valid()) return &w;
+    }
+    return nullptr;
+  }
 
   // roofbmpheight: the top edge of the windshield (0 when the roof is absent).
   int roof_height() const { return roof.valid() ? roof.height : 0; }
@@ -37,11 +49,18 @@ struct Dashboard {
   int dash_top() const { return dash.valid() ? dash.pos_y : 200; }
 };
 
-// Loads "dash" and "roof" from <asset_dir>/STDA<car_id>.PVS (car_id is the four
-// character id, e.g. "COUN"). `loaded` is set only when both shapes are present.
-// Returns out->loaded.
+// Loads "dash", "roof" and the optional "whl1"/"whl2"/"whl3" steering wheel from
+// <asset_dir>/STDA<car_id>.PVS (car_id is the four character id, e.g. "COUN").
+// `loaded` is set only when dash and roof are present; the wheels are best-effort
+// (`wheels_loaded`). Returns out->loaded.
 bool load_dashboard(const std::string& asset_dir, const std::string& car_id,
                     Dashboard* out);
+
+// Index into Dashboard::wheel for `steering_angle` (CARSTATE.car_steeringAngle,
+// 1/1024 turn units): 0 = "whl1" (turned left), 1 = "whl2" (centred) or 2 =
+// "whl3" (turned right). Mirrors seg005.asm loc_2319D, which selects on
+// trunc(steering_angle / 8) against the +-10 dead zone.
+int dashboard_wheel_index(int16_t steering_angle);
 
 // Screen-space rectangles for the dashboard in a view of `width` x `height`
 // pixels (top-left origin). The artwork is authored for a 320x200 view, so x
@@ -57,6 +76,12 @@ struct DashboardRects {
   float dash_y;
   float dash_w;
   float dash_h;
+  // The steering wheel (all three whl sprites share one authored rectangle).
+  bool has_wheel;
+  float wheel_x;
+  float wheel_y;
+  float wheel_w;
+  float wheel_h;
   float windshield_top;
   float windshield_bottom;
 };
