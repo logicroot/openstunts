@@ -272,6 +272,17 @@ void grip_player_response(CarState* car, int16_t initial_angle, int16_t combined
   grip_player_yaw(car, initial_angle, adjusted_angle, combined_grip, demanded_grip);
 }
 
+// Opponent grip response (seg001.asm update_grip loc_1835E): the front wheels
+// take four times the steering angle and the accumulated slide yaw simply
+// decays 15/16 per tick. No slip / banked / sound handling.
+void grip_opponent_response(CarState* car) {
+  car->car_front_wheel_response_angle =
+      static_cast<int16_t>(shl16(car->car_steeringAngle, kFrontWheelAngleShift));
+  if (car->car_slide_yaw_delta != 0) {
+    car->car_slide_yaw_delta = damp_collision_angle(car->car_slide_yaw_delta);
+  }
+}
+
 }  // namespace
 
 int16_t scale_cornering_angle(int16_t angle, int shift) {
@@ -350,7 +361,7 @@ void update_player_steering(uint8_t input_flags, CarState* car, int frames_per_s
   car->car_steeringAngle = steering_angle;
 }
 
-void update_grip(CarState* car, const CarSpec& spec, const Track* track) {
+void update_grip(CarState* car, const CarSpec& spec, const Track* track, int behavior) {
   if (car->car_sumSurfAllWheels == kWheelContactNone) {
     car->car_front_wheel_response_angle = 0;
     car->car_slidingFlag = kCarSlidingInactive;
@@ -366,8 +377,13 @@ void update_grip(CarState* car, const CarSpec& spec, const Track* track) {
   car->car_demandedGrip = static_cast<int16_t>(demanded_grip);
   car->car_surfacegrip_sum = combined_grip;
 
-  // Player behaviour only; opponent steering updates are not reachable yet.
-  grip_player_response(car, initial_angle, combined_grip, demanded_grip, speed_shr8, track);
+  // The original dispatches on the third argument: the player (1) runs the
+  // recenter/slip/banked path, the opponent (0) the short front-wheel path.
+  if (behavior == kGripBehaviorPlayer) {
+    grip_player_response(car, initial_angle, combined_grip, demanded_grip, speed_shr8, track);
+  } else {
+    grip_opponent_response(car);
+  }
 
   grip_heading_offset(car);
   grip_sliding_speed(car);

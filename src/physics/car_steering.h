@@ -1,9 +1,7 @@
 #pragma once
 // Steering input/response and grip/slip handling, ported from restunts
-// `opponent.c` (update_player_steering) and `physics_grip.c` (update_grip).
-//
-// The port runs the player behaviour only (GRIP_BEHAVIOR_PLAYER); the opponent
-// steering path is not used yet.
+// `opponent.c` (update_player_steering) and `physics_grip.c` / seg001.asm
+// (update_grip). Both the player and opponent grip behaviours are implemented.
 
 #include <cstdint>
 
@@ -23,11 +21,17 @@ void update_player_steering(uint8_t input_flags, CarState* car, int frames_per_s
 // Grip and slip update. Called after update_car_speed, before car motion; uses
 // the wheel surface ids refreshed by the previous motion tick.
 //
-// `track` is only needed for the banked-loop front-wheel correction: while the
-// car is rolled on a banked corner (elements 52..55) the front wheels gain an
-// extra share of the roll (seg001.asm update_grip loc_18228). Pass nullptr and
-// that term is skipped.
-void update_grip(CarState* car, const CarSpec& spec, const Track* track = nullptr);
+// `behavior` is the original update_grip third argument: the player is called
+// with kGripBehaviorPlayer (1, seg001.asm loc_18121 -- recenter/slip/banked
+// yaw) and the opponent with kGripBehaviorOpponent (0, loc_1835E -- front
+// wheels = steering<<2 and a slide-yaw decay).
+//
+// `track` is only needed for the player banked-loop front-wheel correction:
+// while the car is rolled on a banked corner (elements 52..55) the front wheels
+// gain an extra share of the roll (seg001.asm update_grip loc_18228). Pass
+// nullptr and that term is skipped.
+void update_grip(CarState* car, const CarSpec& spec, const Track* track = nullptr,
+                 int behavior = kGripBehaviorPlayer);
 
 // Signed arithmetic right shift on the low 16 bits (LEGACY_S16_SAR). Negative
 // (left) angles round down in magnitude, which is the original left-corner

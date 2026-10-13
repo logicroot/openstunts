@@ -296,3 +296,73 @@ TEST(banked_share_stacks_on_the_normal_front_wheel_response) {
 
   EXPECT_EQ(banked.car_front_wheel_response_angle - base.car_front_wheel_response_angle, 6);
 }
+
+// ---- Opponent grip behaviour (seg001.asm loc_1835E) ------------------------
+// update_grip's third argument dispatches: kGripBehaviorPlayer (1) runs the
+// recenter/slip/banked path, kGripBehaviorOpponent (0) the short path where the
+// front wheels take the raw steering angle and the slide yaw just decays.
+
+TEST(opponent_grip_front_wheels_are_steering_times_four) {
+  CarSpec spec = cornering_spec();
+  CarState car = grip_car(55, 25600);
+  update_grip(&car, spec, nullptr, kGripBehaviorOpponent);
+  EXPECT_EQ(car.car_front_wheel_response_angle, 220);  // 55 << 2
+
+  CarState neg = grip_car(-55, 25600);
+  update_grip(&neg, spec, nullptr, kGripBehaviorOpponent);
+  EXPECT_EQ(neg.car_front_wheel_response_angle, -220);
+}
+
+TEST(opponent_grip_keeps_full_steering_under_slip) {
+  // The opponent never blends in the slip angle, so even a demand far above the
+  // combined grip leaves the front wheels at 4x (and the slide flag untouched).
+  CarSpec spec = cornering_spec();
+  CarState car = grip_car(120, 25600);
+  update_grip(&car, spec, nullptr, kGripBehaviorOpponent);
+  EXPECT_EQ(car.car_front_wheel_response_angle, 480);
+  EXPECT_EQ(car.car_slidingFlag, kCarSlidingInactive);
+}
+
+TEST(opponent_grip_decays_slide_yaw_by_15_16) {
+  CarSpec spec = cornering_spec();
+
+  CarState car = grip_car(0, 0);
+  car.car_slide_yaw_delta = 100;
+  update_grip(&car, spec, nullptr, kGripBehaviorOpponent);
+  EXPECT_EQ(car.car_slide_yaw_delta, 93);  // (100 * 15) >> 4
+
+  CarState neg = grip_car(0, 0);
+  neg.car_slide_yaw_delta = -100;
+  update_grip(&neg, spec, nullptr, kGripBehaviorOpponent);
+  EXPECT_EQ(neg.car_slide_yaw_delta, -94);  // arithmetic shift rounds down
+}
+
+TEST(opponent_grip_damps_velocity_heading_when_not_sliding) {
+  CarSpec spec = cornering_spec();
+  CarState car = grip_car(0, 0);
+  car.car_velocity_heading_offset = 100;
+  car.car_slide_yaw_delta = 0;
+  update_grip(&car, spec, nullptr, kGripBehaviorOpponent);
+  EXPECT_EQ(car.car_velocity_heading_offset, 93);  // shared damp, (100*15)>>4
+}
+
+TEST(opponent_grip_clears_slip_angle_and_keeps_speed) {
+  CarSpec spec = cornering_spec();
+  CarState car = grip_car(0, 25600);
+  car.car_slip_angle = 77;
+  update_grip(&car, spec, nullptr, kGripBehaviorOpponent);
+  EXPECT_EQ(car.car_slip_angle, 0);          // shared tail clears field_42
+  EXPECT_EQ(car.car_actual_speed, 25600);    // no slide drain (flag stays 0)
+  EXPECT_EQ(car.car_rev_speed, 25600);
+}
+
+TEST(opponent_and_player_grip_dispatches_differ) {
+  CarSpec spec = cornering_spec();
+  CarState player = grip_car(60, 25600);
+  CarState opponent = grip_car(60, 25600);
+  update_grip(&player, spec, nullptr, kGripBehaviorPlayer);
+  update_grip(&opponent, spec, nullptr, kGripBehaviorOpponent);
+  EXPECT_EQ(opponent.car_front_wheel_response_angle, 240);  // 60 << 2
+  EXPECT_TRUE(opponent.car_front_wheel_response_angle !=
+              player.car_front_wheel_response_angle);
+}
