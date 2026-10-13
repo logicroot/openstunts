@@ -435,4 +435,78 @@ bool TrackRoute::checkpoint(int node, int index, const Track& track,
   return index == arrow_type - 1;
 }
 
+std::vector<uint16_t> TrackRoute::opponent_path(const uint8_t* sped,
+                                                int sped_len) const {
+  // The original accumulates a 32-bit cost and starts `best` at 0x0F423F.
+  constexpr int32_t kNoCost = 0x0F423F;
+  std::vector<uint16_t> list;   // the current DFS path (the original's L[])
+  std::vector<uint16_t> out;    // trackdata3
+  struct Frame {
+    int node;
+    int len;          // list length to restore (var_B28)
+    int32_t cost;
+  };
+  std::vector<Frame> stack;
+
+  const auto add = [&](int node) -> int32_t {
+    const int e = nodes_[static_cast<size_t>(node)].elem;
+    // load_opponent_data reads the 16-byte 'sped' chunk by element, so for
+    // elements >= 16 the original runs past the chunk into the next resource
+    // in the decompressed file. Clamp those to 0 (weight 1).
+    const int v = (e >= 0 && e < sped_len) ? sped[e] : 0;
+    return static_cast<int32_t>(v) + 1;
+  };
+
+  int32_t best = kNoCost;
+  int32_t cost = 0;
+  int si = 0;
+
+  for (;;) {
+    int last = 0;   // var_2: primary successor is 0 (a completed lap)
+    int stop = 0;   // var_410: do not descend, compare/backtrack
+    const int next = successor(si);  // td01; 0 = wrap to node 0, -1 = none
+    if (next == 0) {
+      last = 1;
+      stop = 1;
+    } else if (next == -1) {
+      stop = 1;
+    } else if (!list.empty()) {
+      for (size_t di = 0; di < list.size(); ++di) {
+        if (list[di] == static_cast<uint16_t>(si)) stop = 1;
+      }
+    }
+
+    // loc_218DA: record the node and add its element's weight.
+    list.push_back(static_cast<uint16_t>(si));
+    cost += add(si);
+
+    if (stop == 0) {
+      // loc_219FE: stash the secondary successor, descend the primary one.
+      const int alt = alternate(si);
+      if (alt != -1) stack.push_back(Frame{alt, static_cast<int>(list.size()), cost});
+      si = next;
+      continue;
+    }
+
+    // loc_2191A: if the lap closed, keep it when strictly cheaper.
+    if (last != 0 && cost < best) {
+      best = cost;
+      list.push_back(0);  // L[var_B28] = 0; the list terminator
+      out.assign(list.begin(), list.end());
+      out.push_back(0);
+      out.push_back(1);
+    }
+
+    // loc_219A5: backtrack to the most recent unexplored branch.
+    if (stack.empty()) break;
+    const Frame f = stack.back();
+    stack.pop_back();
+    si = f.node;
+    list.resize(static_cast<size_t>(f.len));
+    cost = f.cost;
+  }
+
+  return out;
+}
+
 }  // namespace s3d::world

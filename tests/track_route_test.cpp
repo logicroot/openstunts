@@ -161,3 +161,52 @@ TEST(track_route_checkpoint_default_track) {
   EXPECT_TRUE(route.checkpoint(0, 1, track, &cp));
   EXPECT_EQ(cp.z, 5966);
 }
+
+// seg004.asm load_opponent_data: the opponent course path (trackdata3).
+TEST(track_route_opponent_path_walks_the_synthetic_loop) {
+  const Track track = make_loop_track();
+  TrackRoute route;
+  EXPECT_TRUE(route.build(track, 3, 2, 0x000));
+
+  // OPP1's sped table (only the cost weights use it; this loop has no forks).
+  const uint8_t sped[16] = {120, 75, 50, 40, 30, 20, 60, 40,
+                            20,  90, 115, 20, 30, 70, 80, 50};
+  const std::vector<uint16_t> p = route.opponent_path(sped, 16);
+  // The whole 8-node ring, then the original's 0, 0, 1 tail.
+  const uint16_t want[11] = {0, 1, 2, 3, 4, 5, 6, 7, 0, 0, 1};
+  EXPECT_EQ(p.size(), 11u);
+  for (size_t i = 0; i < p.size() && i < 11; ++i) EXPECT_EQ(p[i], want[i]);
+}
+
+// Over the shipped DEFAULT.TRK the path must be a real walk along the graph
+// (successor or alternate at each step) that closes back onto node 0.
+TEST(track_route_opponent_path_over_default_track) {
+  const std::string dir = find_asset_dir();
+  if (dir.empty()) {
+    std::printf("  (skipped: no Stunts asset dir found)\n");
+    return;
+  }
+  const Track track = Track::load(path_join(dir, "DEFAULT.TRK"));
+  const StartFinish sf = find_start_finish(track);
+  TrackRoute route;
+  EXPECT_TRUE(route.build(track, sf.col, Track::kSize - 1 - sf.row, sf.angle));
+
+  const uint8_t sped[16] = {120, 75, 50, 40, 30, 20, 60, 40,
+                            20,  90, 115, 20, 30, 70, 80, 50};
+  const std::vector<uint16_t> p = route.opponent_path(sped, 16);
+  EXPECT_TRUE(p.size() >= 4u);
+  EXPECT_EQ(p[p.size() - 1], 1);
+  EXPECT_EQ(p[p.size() - 2], 0);
+  EXPECT_EQ(p[p.size() - 3], 0);
+
+  const size_t nodes = p.size() - 3;  // entries before the 0/0/1 tail
+  for (size_t i = 0; i < nodes; ++i) {
+    EXPECT_TRUE(p[i] < static_cast<uint16_t>(route.node_count()));
+  }
+  for (size_t i = 0; i + 1 < nodes; ++i) {
+    const int a = p[i];
+    const int b = p[i + 1];
+    EXPECT_TRUE(route.successor(a) == b || route.alternate(a) == b);
+  }
+  EXPECT_EQ(route.successor(p[nodes - 1]), 0);  // the lap closes
+}

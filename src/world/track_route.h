@@ -103,6 +103,15 @@ class TrackRoute {
   // needed only for that terrain lookup.
   bool checkpoint(int node, int index, const Track& track, RouteCheckpoint* out) const;
 
+  // seg004.asm load_opponent_data: builds the opponent's course path
+  // (`trackdata3`), the flat node sequence the AI in seg001.asm opponent_op
+  // walks. A depth-first search over the primary/secondary successor graph
+  // (td01/td02) keeps the lap with the smallest sum of (sped[element] + 1),
+  // where `sped` is the opponent's 16-byte table from OPPn.PRE. The returned
+  // buffer mirrors the original exactly: the chosen nodes, then 0x0000
+  // (the wrap marker opponent_op tests), then an extra 0x0000 and 0x0001.
+  std::vector<uint16_t> opponent_path(const uint8_t* sped, int sped_len) const;
+
   int start_col() const { return start_col_; }
   int start_row() const { return start_row_; }
 
