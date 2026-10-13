@@ -784,11 +784,10 @@ void DriveScene::update_camera() {
                                                    static_cast<float>(eye_world_f.z) / 64.0f);
 
     camera_.position = eye_pos;
-    // Look straight ahead along the car's forward axis (local +Z transformed by world rot).
-    fixed::Vec3 fwd_local{0, 0, 1 << 6};  // 1 unit in 1/64
+    // Look slightly down and forward along the car's forward axis for a better cockpit view.
+    fixed::Vec3 fwd_local{0, -3, 1 << 6};  // forward and slightly down
     fixed::Vec3 fwd_world;
-    fixed::mat_mul_vector(fwd_local, rot_inv, &fwd_world);  // rot_inv is the body rotation
-    // wait - the car's world rot is rot_inv? we computed rot_inv as mat_rot_zxy(-roll,-pitch,-yaw) which matches car_model_matrix's world_rot
+    fixed::mat_mul_vector(fwd_local, rot_inv, &fwd_world);
     const glm::vec3 look = eye_pos + glm::vec3(static_cast<float>(fwd_world.x) / 64.0f,
                                                 static_cast<float>(fwd_world.y) / 64.0f,
                                                 static_cast<float>(fwd_world.z) / 64.0f);
