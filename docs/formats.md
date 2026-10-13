@@ -228,9 +228,13 @@ companion archive `STDB<car>.PVS`.
 
 The original renders the 3D world inside `rect_windshield =
 [roofbmpheight, dashbmp_y]` and composites the panel over the rest. The port
-draws, in this order, `dash` → steering wheel → `ins2` → needles → `gbox` →
-gear knob → steering dot → `roof`. All of the panel art is blitted opaquely,
-so later pieces hide earlier ones where they overlap. In particular:
+reproduces the original's 4:3 pixel aspect for the panel (x is scaled at 5/6 of
+the y scale) and centres the 320-wide frame horizontally, so the dials and the
+lever keep their shape on a widescreen window; on a 4:3 view that is just
+`width/320 × height/200`. It draws, in this order, `dash` → steering wheel →
+`ins2` → needles → `gbox` → gear knob → steering dot → `roof`. All of the panel
+art is blitted opaquely, so later pieces hide earlier ones where they overlap.
+In particular:
 
 * The steering wheel is picked from `whl1`/`whl2`/`whl3` by the steering angle
   (`seg005.asm loc_2319D`: `trunc(angle/8)` against a ±10 dead zone), then
