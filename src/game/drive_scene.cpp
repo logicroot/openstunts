@@ -784,14 +784,12 @@ void DriveScene::update_camera() {
                                                    static_cast<float>(eye_world_f.z) / 64.0f);
 
     camera_.position = eye_pos;
-    // Look slightly down and forward along the car's forward axis for a better cockpit view.
-    fixed::Vec3 fwd_local{0, -3, 1 << 6};  // forward and slightly down
-    fixed::Vec3 fwd_world;
-    fixed::mat_mul_vector(fwd_local, rot_inv, &fwd_world);
-    const glm::vec3 look = eye_pos + glm::vec3(static_cast<float>(fwd_world.x) / 64.0f,
-                                                static_cast<float>(fwd_world.y) / 64.0f,
-                                                static_cast<float>(fwd_world.z) / 64.0f);
-    aim_at(camera_, look);
+    // Set orientation from car yaw/pitch, looking slightly down for cockpit
+    const float yaw_r = car_yaw(alpha);
+    camera_.yaw_deg = glm::degrees(-yaw_r - glm::pi<float>() * 0.5f);  // adjust to Camera convention
+    camera_.pitch_deg = glm::degrees(car_pitch(alpha)) - 5.0f;  // look slightly down
+    if (camera_.pitch_deg > 89.0f) camera_.pitch_deg = 89.0f;
+    if (camera_.pitch_deg < -89.0f) camera_.pitch_deg = -89.0f;
     // Don't overwrite camera_prev_ here; the caller manages interpolation snapshots.
     return;
   }
