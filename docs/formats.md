@@ -228,6 +228,9 @@ companion archive `STDB<car>.PVS`.
 
 The original renders the 3D world inside `rect_windshield =
 [roofbmpheight, dashbmp_y]` and composites the panel over the rest. The port
+scales the authored 320×200 frame by the same factor in both axes
+(`view_height/200` on a wide view) and centres it horizontally, rather than
+stretching x to the window width, so every panel sprite keeps its shape; it then
 draws, in this order, `dash` → steering wheel → `ins2` → needles → `gbox` →
 gear knob → steering dot → `roof`. All of the panel art is blitted opaquely,
 so later pieces hide earlier ones where they overlap. In particular:

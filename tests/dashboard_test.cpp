@@ -2,6 +2,7 @@
 // assets) and, when the Stunts asset directory is present, loading the player
 // car's "dash"/"roof" panels from STDACOUN.PVS (seg005.asm setup_car_shapes).
 
+#include <cmath>
 #include <string>
 
 #include "assets/sprite2d.h"
@@ -29,7 +30,13 @@ world::Dashboard synthetic_dashboard() {
   return d;
 }
 
+bool approx(float a, float b) { return std::fabs(a - b) < 0.01f; }
+
 }  // namespace
+
+// The dashboard is authored for a 320x200 view, so it is scaled by the same
+// factor in both axes and centred horizontally instead of being stretched to
+// the view width.
 
 TEST(dashboard_leader_rects_authored) {
   const world::Dashboard d = synthetic_dashboard();
@@ -51,8 +58,10 @@ TEST(dashboard_leader_rects_authored) {
 TEST(dashboard_rects_scale_to_view) {
   const world::Dashboard d = synthetic_dashboard();
   world::DashboardRects r;
-  // x scales with the view width, y with the view height.
+  // 640x400 is exactly 320x200 doubled, so x and y both double and the frame
+  // still fills the view.
   EXPECT_TRUE(world::dashboard_rects(d, 640, 400, &r));
+  EXPECT_EQ(r.roof_x, 0.0f);
   EXPECT_EQ(r.roof_w, 640.0f);
   EXPECT_EQ(r.roof_h, 18.0f);
   EXPECT_EQ(r.dash_y, 260.0f);
@@ -60,24 +69,34 @@ TEST(dashboard_rects_scale_to_view) {
   EXPECT_EQ(r.windshield_top, 18.0f);
   EXPECT_EQ(r.windshield_bottom, 260.0f);
 
+  // On a wider view the frame is height-driven, so it no longer reaches the
+  // edges: at 1280x720 it is 320 * 3.6 = 1152px wide, centred at x=64.
   EXPECT_TRUE(world::dashboard_rects(d, 1280, 720, &r));
-  EXPECT_EQ(r.roof_w, 1280.0f);
-  EXPECT_EQ(r.roof_h, 9.0f * 3.6f);
-  EXPECT_EQ(r.dash_y, 130.0f * 3.6f);
-  EXPECT_EQ(r.dash_h, 70.0f * 3.6f);
-  EXPECT_EQ(r.windshield_bottom, 130.0f * 3.6f);
+  EXPECT_TRUE(approx(r.scale_x, 3.6f));
+  EXPECT_TRUE(approx(r.scale_y, 3.6f));
+  EXPECT_TRUE(approx(r.roof_x, 64.0f));
+  EXPECT_TRUE(approx(r.roof_w, 1152.0f));
+  EXPECT_TRUE(approx(r.roof_h, 9.0f * 3.6f));
+  EXPECT_TRUE(approx(r.dash_x, 64.0f));
+  EXPECT_TRUE(approx(r.dash_w, 1152.0f));
+  EXPECT_TRUE(approx(r.dash_y, 130.0f * 3.6f));
+  EXPECT_TRUE(approx(r.dash_h, 70.0f * 3.6f));
+  EXPECT_TRUE(approx(r.dash_y + r.dash_h, 720.0f));  // reaches the bottom edge
+  EXPECT_TRUE(approx(r.windshield_top, 32.4f));
+  EXPECT_TRUE(approx(r.windshield_bottom, 468.0f));
 }
 
-TEST(dashboard_rects_spans_full_width) {
+TEST(dashboard_rects_fits_narrow_view) {
   const world::Dashboard d = synthetic_dashboard();
-  // The panel is authored full-width, so it must always reach both edges.
-  for (int w : {320, 640, 1024, 1280, 1920}) {
-    world::DashboardRects r;
-    EXPECT_TRUE(world::dashboard_rects(d, w, 200, &r));
-    EXPECT_EQ(r.dash_x, 0.0f);
-    EXPECT_EQ(r.dash_w, static_cast<float>(w));
-    EXPECT_EQ(r.roof_w, static_cast<float>(w));
-  }
+  world::DashboardRects r;
+  // A tall view caps the scale so the frame still fits horizontally (and stays
+  // centred): 600x800 -> scale 600/320 = 1.875.
+  EXPECT_TRUE(world::dashboard_rects(d, 600, 800, &r));
+  EXPECT_TRUE(approx(r.scale_x, 1.875f));
+  EXPECT_TRUE(approx(r.scale_y, 1.875f));
+  EXPECT_TRUE(approx(r.dash_x, 0.0f));
+  EXPECT_TRUE(approx(r.dash_w, 600.0f));
+  EXPECT_TRUE(approx(r.roof_w, 600.0f));
 }
 
 TEST(dashboard_rects_wheel) {
