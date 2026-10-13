@@ -316,6 +316,11 @@ void update_engine_limiter(CarState* car, const CarSpec& spec) {
 
 }  // namespace
 
+bool gear_box_visible(const CarState& car) {
+  return car.car_changing_gear != kGearChangeInactive ||
+         car.car_gear_change_delay != kGearChangeDelayExpired;
+}
+
 void update_car_speed(uint8_t input_flags, const CarSpec& spec, CarState* car,
                       int frames_per_sec, bool is_opponent, uint8_t opponent_target_speed,
                       uint16_t* top_speed) {

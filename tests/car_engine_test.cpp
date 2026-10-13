@@ -118,3 +118,47 @@ TEST(car_engine_coasting_loses_speed) {
   }
   EXPECT_TRUE(car.car_actual_speed < fast);  // aero drag + engine braking
 }
+
+TEST(car_gear_box_visible_only_around_a_shift) {
+  CarState car;  // resting: no shift in progress, no display delay left
+  EXPECT_TRUE(!gear_box_visible(car));
+
+  // While the lever slides between gates the plate is on screen.
+  car.car_changing_gear = kGearChangeActive;
+  EXPECT_TRUE(gear_box_visible(car));
+
+  // ...and it stays up for the 1.5 s display delay afterwards.
+  car.car_changing_gear = kGearChangeInactive;
+  car.car_gear_change_delay = 1;
+  EXPECT_TRUE(gear_box_visible(car));
+
+  car.car_gear_change_delay = kGearChangeDelayExpired;
+  EXPECT_TRUE(!gear_box_visible(car));
+}
+
+TEST(car_gear_box_hides_once_the_shift_settles) {
+  const std::string dir = find_asset_dir();
+  if (dir.empty()) return;
+  CarSpec spec;
+  if (!CarSpec::load(path_join(dir, "CARCOUN.RES"), &spec)) return;
+
+  CarState car = make_ready_car(spec);
+  car.car_transmission = kTransmissionManual;
+  EXPECT_TRUE(!gear_box_visible(car));
+
+  update_car_speed(kInputPrimaryAction, spec, &car, kGameFrameRateNormal);
+  EXPECT_EQ(static_cast<int>(car.car_current_gear), 2);
+  EXPECT_TRUE(gear_box_visible(car));
+
+  // The plate must stay up past the lever animation and then disappear on its
+  // own: seg005.asm loc_23030 only blanks it once both `car_changing_gear` and
+  // `car_fpsmul2` are zero.
+  int visible_ticks = 0;
+  for (int tick = 0; tick < 200; ++tick) {
+    update_car_speed(kInputNone, spec, &car, kGameFrameRateNormal);
+    if (!gear_box_visible(car)) break;
+    ++visible_ticks;
+  }
+  EXPECT_TRUE(visible_ticks > 0);
+  EXPECT_TRUE(visible_ticks < 200);
+}

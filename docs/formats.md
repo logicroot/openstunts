@@ -257,8 +257,14 @@ particular:
   `ins2` is blitted over its lower rows. `ins2`'s upper 20 rows are identical to
   `dash`, so only the turned-wheel art inside the wheel cut-out is actually
   hidden.
-* `gbox` is blitted at (256,144), overwriting the `dash` art underneath it
-  every frame; the `dash` region below the gear box is therefore invisible.
+* `gbox` is blitted at (256,144), overwriting the `dash` art underneath it. It
+  is on screen only around a gear change: `seg005.asm loc_23030` restores the
+  saved background (the `dash` art) and blanks the plate once both
+  `car_changing_gear` and `car_fpsmul2` reach zero, so the plate and lever
+  disappear again after the shift. `car_fpsmul2` is set to 1.5 s of frames when
+  a shift starts (`statecar.c`, `(framespersec >> 1) + framespersec`) and only
+  counts down once the lever has reached its gate, i.e. the pair stays up for
+  the lever animation plus 1.5 s.
 
 ### Cockpit instruments (`seg005.asm setup_car_shapes`, case 2)
 
@@ -303,6 +309,8 @@ gate. `car_knob_x/y` are seeded to `knob_points[1]` at race start
 (`restunts.c init_game_state`). `gnab` is 0x00 over the knob's footprint and
 0xFF over the surround, so drawing it opaquely first is what keeps the gear-box
 art visible around the lever (the knob's own palette-index-0 pixels stay black).
+The plate and the lever share the same visibility window (see `gbox` above): the
+port draws neither while `car_changing_gear` and `car_fpsmul2` are both zero.
 
 The steering dot (`dot ` and its `dota` stencil) is staged the same way: the
 steering angle maps to an index `min(|sign(a) * (|a| >> 3)|, 30)` into

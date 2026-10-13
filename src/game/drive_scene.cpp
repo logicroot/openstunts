@@ -1064,13 +1064,17 @@ void DriveScene::draw_dashboard(int width, int height) {
   // knob is an AND-stencil ("gnab") + OR-colour ("gnob") pair: the 0x00 of the
   // stencil clears the footprint to black (so the knob's own index 0 pixels stay
   // black) and the stencil's 0xFF surround is what makes the rest transparent.
-  if (r.has_gear_box) {
+  // Both are on screen only around a gear change (loc_23030 erases them and
+  // restores the saved background once `car_fpsmul2` and `car_changing_gear`
+  // are both zero), so skip the plate and the lever when idle.
+  const bool gear_box_shown = physics::gear_box_visible(car_);
+  if (r.has_gear_box && gear_box_shown) {
     verts.clear();
     append_textured_quad(verts, r.gear_box_x, r.gear_box_y, r.gear_box_w,
                          r.gear_box_h);
     sprites_.draw(dashboard_gear_box_texture_, verts, width, height);
   }
-  if (r.has_knob) {
+  if (r.has_knob && gear_box_shown) {
     const float cx = r.gear_box_x + static_cast<float>(car_.car_knob_x) * r.scale_x;
     const float cy = r.gear_box_y + static_cast<float>(car_.car_knob_y) * r.scale_y;
     verts.clear();

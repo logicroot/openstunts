@@ -18,4 +18,11 @@ void update_car_speed(uint8_t input_flags, const CarSpec& spec, CarState* car,
                       int frames_per_sec, bool is_opponent = false,
                       uint8_t opponent_target_speed = 200, uint16_t* top_speed = nullptr);
 
+// True while the cockpit gear-selector plate ("gbox") and its lever knob should
+// be on screen. The original draws the pair while a shift is in progress and
+// keeps them up for a further `gear_change_delay` (1.5 s) afterwards; only once
+// both `car_changing_gear` and `car_fpsmul2` are zero does seg005.asm loc_23030
+// restore the saved background and blank the plate.
+bool gear_box_visible(const CarState& car);
+
 }  // namespace s3d::physics
