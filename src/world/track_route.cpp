@@ -2,6 +2,7 @@
 
 #include <array>
 
+#include "world/track_objects.h"
 #include "world/track_route_data.h"
 
 namespace s3d::world {
@@ -353,6 +354,11 @@ bool TrackRoute::checkpoint(int node, int index, const Track& track,
   if (node < 0 || node >= node_count_ || out == nullptr) return false;
   const RouteNode& n = nodes_[static_cast<size_t>(node)];
   const RouteBlockDef& b = block(n.elem, n.sub_block);
+
+  // The sped-table index inputs (field_3F9 = oppnentSped[speed_code + surface]).
+  out->speed_code = b.opp_sped_code;
+  out->surface = world::track_object(n.elem).surface;
+
   const int arrow_type = b.arrow_type;
   if (arrow_type <= 0 || index < 0 || index >= arrow_type) return false;
 

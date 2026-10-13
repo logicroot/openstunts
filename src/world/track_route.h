@@ -61,6 +61,12 @@ struct RouteCheckpoint {
   int ax = 0, ay = 0, az = 0;
   int bx = 0, by = 0, bz = 0;
   int opp1 = 0;
+  // Inputs to field_3F9: the block's TRKOBJINFO.si_oppSpedCode and the cell's
+  // TRACKOBJECT.ss_surfaceType. The caller (the opponent AI) indexes its sped
+  // table as oppnentSped[speed_code + surface]; the original computes this
+  // inside sub_18D60 only when the caller passes a non-null output.
+  uint8_t speed_code = 0;
+  uint8_t surface = 0;
 };
 
 class TrackRoute {

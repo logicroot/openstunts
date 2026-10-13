@@ -16,6 +16,7 @@ add_executable(s3d_tests
   car_steering_test.cpp
   car_motion_test.cpp
   car_collision_test.cpp
+  opponent_test.cpp
   car_debris_test.cpp
   track_collision_test.cpp
   font_test.cpp
