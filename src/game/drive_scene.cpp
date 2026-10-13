@@ -770,7 +770,10 @@ void DriveScene::update_camera() {
         fixed::mat_rot_zxy(physics::wrap_negate(roll256), physics::wrap_negate(pitch256),
                            physics::wrap_negate(yaw256), 0);
 
-    const int32_t eye_y = static_cast<int32_t>(spec_.car_height) - 6;
+    int32_t eye_y = static_cast<int32_t>(spec_.car_height) - 6;
+    if (eye_y < 20) {
+      eye_y = 40;
+    }
     fixed::Vec3 eye_off{0, static_cast<int16_t>(eye_y), 0};
     fixed::Vec3 eye_world_f;
     fixed::mat_mul_vector(eye_off, rot_inv, &eye_world_f);
@@ -781,7 +784,14 @@ void DriveScene::update_camera() {
                                                    static_cast<float>(eye_world_f.z) / 64.0f);
 
     camera_.position = eye_pos;
-    const glm::vec3 look = car_pos + glm::vec3(0.0f, kFollowAimHeight, 0.0f);
+    // Look straight ahead along the car's forward axis (local +Z transformed by world rot).
+    fixed::Vec3 fwd_local{0, 0, 1 << 6};  // 1 unit in 1/64
+    fixed::Vec3 fwd_world;
+    fixed::mat_mul_vector(fwd_local, rot_inv, &fwd_world);  // rot_inv is the body rotation
+    // wait - the car's world rot is rot_inv? we computed rot_inv as mat_rot_zxy(-roll,-pitch,-yaw) which matches car_model_matrix's world_rot
+    const glm::vec3 look = eye_pos + glm::vec3(static_cast<float>(fwd_world.x) / 64.0f,
+                                                static_cast<float>(fwd_world.y) / 64.0f,
+                                                static_cast<float>(fwd_world.z) / 64.0f);
     aim_at(camera_, look);
     // Don't overwrite camera_prev_ here; the caller manages interpolation snapshots.
     return;
