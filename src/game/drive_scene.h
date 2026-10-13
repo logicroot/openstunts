@@ -216,8 +216,8 @@ class DriveScene : public Scene {
   Texture dashboard_dast_mask_texture_;
   bool dashboard_on_ = true;
 
-  // Camera mode: 0 = cockpit (not fully implemented yet), 1-3 = chase/varied.
-  int camera_mode_ = 1;  // default to chase for now (current behaviour)
+  // Camera mode: 0 = cockpit, 1-3 = chase/varied.
+  int camera_mode_ = 0;  // default to cockpit (cameramode 0)
 
   std::string screenshot_path_;
   int screenshot_frame_ = 0;
