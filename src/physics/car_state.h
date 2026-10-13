@@ -67,6 +67,8 @@ inline constexpr int kGripBehaviorPlayer = 1;
 inline constexpr int kCrashEventNone = 0;
 inline constexpr int kCrashEventCollision = 1;
 inline constexpr int kCrashEventWater = 2;
+// update_crash_state(3, MplayerFlag): driving off the course band (lap 1+).
+inline constexpr int kCrashEventOffTrack = 3;
 
 // Per-frame car sound flags (restunts gamestate.h).
 inline constexpr int kCarSoundNone = 0;
@@ -130,6 +132,7 @@ struct CarState {
   int8_t car_transmission = kTransmissionAutomatic;
   int8_t car_lap_count = 0;
   int8_t car_route_point_index = 0;
+  int8_t car_route_flag = 0;  // field_CF (opponent_op's steering-nav latch)
   int8_t car_sound_flags = 0;
 };
 

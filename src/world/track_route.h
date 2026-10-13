@@ -114,6 +114,7 @@ class TrackRoute {
 
   int start_col() const { return start_col_; }
   int start_row() const { return start_row_; }
+  int start_angle() const { return start_angle_; }
 
  private:
   static constexpr int kMaxNodes = 0x385;  // the original's array size
@@ -125,6 +126,7 @@ class TrackRoute {
   int node_count_ = 0;
   int start_col_ = 0;
   int start_row_ = 0;
+  int start_angle_ = 0;
   RouteError error_ = RouteError::none;
 };
 

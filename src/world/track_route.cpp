@@ -136,6 +136,7 @@ bool TrackRoute::build(const Track& track, int start_col, int start_row,
   node_count_ = 0;
   start_col_ = start_col;
   start_row_ = start_row;
+  start_angle_ = start_angle;
 
   td01_.assign(kMaxNodes, -1);
   td02_.assign(kMaxNodes, -1);

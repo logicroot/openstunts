@@ -50,6 +50,7 @@ add_library(stunts3d_core STATIC
   src/physics/car_collision.cpp
   src/physics/car_debris.cpp
   src/physics/track_collision.cpp
+  src/physics/opponent_ai.cpp
   src/world/track_elevation.cpp
   src/world/track_mesh.cpp
   src/world/car_mesh.cpp
