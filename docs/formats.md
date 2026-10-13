@@ -204,6 +204,26 @@ graphics (`seg003.asm load_sdgame2_shapes`):
   side of the crashed car's viewport-clipped screen rectangle
   (`frame.c` `shape_op_explosion`).
 
+### Cockpit dashboard (`STDA<car>.PVS`)
+
+Each player car ships a dashboard archive named `STDA` + the car id (e.g.
+`STDACOUN.PVS`). It holds the 2D panel drawn over the lower/upper screen bands
+in the original's default view (`dashb_toggle = 1`, `seg005.asm`
+`setup_car_shapes` / `c/restunts.c run_game`). For the Countach:
+
+| id | size | pos | role |
+| --- | --- | --- | --- |
+| `dash` | 320×70 | (0,130) | the main panel; `s2d_pos_y` is `dashbmp_y` |
+| `roof` | 320×9 | (0,0) | the cockpit frame; `s2d_height` is `roofbmpheight` |
+| `whl1`/`whl2`/`whl3` | 184×32 | (40,168) | the steering wheel (animated) |
+| `gnob`/`gbox` | | | the gear lever (animated, from `car_knob_x/y`) |
+| `ins1`/`ins2`/`ins3`, `inm1`/`inm3` | | | instrument cluster overlays |
+
+The original renders the 3D world inside `rect_windshield =
+[roofbmpheight, dashbmp_y]` and composites the panel over the rest. The port
+draws `dash` and `roof` opaquely; the animated wheel/lever/gauges are not wired
+up yet.
+
 ## Track assembly (`.TRK` → geometry)
 
 The 900-byte item grid and the 900-byte terrain grid address the same physical

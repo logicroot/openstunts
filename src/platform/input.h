@@ -14,6 +14,7 @@ struct Controls {
   bool gear_down = false;  // edge-triggered
   bool reset_car = false;  // edge-triggered
   bool toggle_camera = false;
+  bool toggle_dashboard = false;  // edge-triggered (in-race cockpit panel)
   bool pause = false;
 };
 

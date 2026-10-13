@@ -45,6 +45,11 @@ constexpr float kFollowVerticalStep = 30.0f;
 
 constexpr float kAngleToRadians = 6.28318530718f / 1024.0f;
 
+// The port drives the Countach (gameconfig.game_playercarid default "COUN"): its
+// performance data is CARCOUN.RES, its bodywork STCOUN.P3S and its cockpit
+// dashboard STDACOUN.PVS.
+constexpr const char* kPlayerCarId = "COUN";
+
 // 8-bit RGB for a VGA palette index (the original draws HUD text with the
 // palette indices 15 = white and 0 = black drop shadow).
 glm::vec4 palette_color(const Palette& p, int index) {
@@ -152,10 +157,11 @@ void fill_fallback_torque_curve(CarSpec* spec) {
 
 CarSpec load_or_default_spec(const std::string& asset_dir) {
   CarSpec spec;
-  if (!asset_dir.empty() && CarSpec::load(path_join(asset_dir, "CARCOUN.RES"), &spec)) {
+  const std::string car_res = std::string("CAR") + kPlayerCarId + ".RES";
+  if (!asset_dir.empty() && CarSpec::load(path_join(asset_dir, car_res), &spec)) {
     return spec;
   }
-  S3D_WARN("CARCOUN.RES not found; using a placeholder car specification");
+  S3D_WARN("%s not found; using a placeholder car specification", car_res.c_str());
 
   // Counter-exact physical constants (verified against CARCOUN.RES) so
   // steering/grip feel right even without the retail asset file.
@@ -265,7 +271,8 @@ bool DriveScene::on_enter() {
 
   have_palette_ = have_palette;
   car_lib_ = std::make_shared<ShapeLibrary>();
-  if (asset_dir_.empty() || !world::load_car_archive(asset_dir_, "COUN", car_lib_.get())) {
+  if (asset_dir_.empty() ||
+      !world::load_car_archive(asset_dir_, kPlayerCarId, car_lib_.get())) {
     car_lib_.reset();
   }
   wheel_pose_ = world::CarWheelPose{};
@@ -384,6 +391,29 @@ bool DriveScene::on_enter() {
     }
   } else {
     S3D_WARN("no palette; the horizon scenery is disabled");
+  }
+
+  // ---- Cockpit dashboard ---------------------------------------------------
+  // The car's own dashboard archive (STDA<ID>.PVS). Its "dash" panel and "roof"
+  // frame are drawn opaquely over the bands outside the windshield; the
+  // original shows this by default (dashb_toggle = 1 in a fresh race).
+  if (have_palette && !asset_dir_.empty() &&
+      world::load_dashboard(asset_dir_, kPlayerCarId, &dashboard_)) {
+    const Sprite2D* shapes[2] = {&dashboard_.dash, &dashboard_.roof};
+    for (int i = 0; i < 2; ++i) {
+      const Sprite2D& s = *shapes[i];
+      std::vector<uint8_t> rgba(s.pixels.size() * 4);
+      for (size_t p = 0; p < s.pixels.size(); ++p) {
+        const uint8_t* c = palette_.rgb8[s.pixels[p]];
+        rgba[p * 4 + 0] = c[0];
+        rgba[p * 4 + 1] = c[1];
+        rgba[p * 4 + 2] = c[2];
+        rgba[p * 4 + 3] = 255;
+      }
+      dashboard_textures_[i].upload_rgba(s.width, s.height, rgba.data());
+    }
+  } else if (have_palette) {
+    S3D_WARN("dashboard: STDACOUN.PVS not found; the cockpit panel is disabled");
   }
 
   reset_car();
@@ -603,6 +633,10 @@ void DriveScene::update_camera() {
 
 void DriveScene::update(double dt, const Controls& controls) {
   if (controls.reset_car) reset_car();
+  // handle_ingame_kb_shortcuts: 'D' toggles the cockpit dashboard.
+  if (controls.toggle_dashboard && dashboard_.valid()) {
+    dashboard_on_ = !dashboard_on_;
+  }
 
   accumulator_ += dt;
   int steps = 0;
@@ -779,7 +813,12 @@ void DriveScene::build_hud(std::vector<Vertex>& verts, int width, int height,
     const std::string time_str = game::format_race_time(race_.game_frame, 20, false);
     const float text_w = static_cast<float>(hud_font_.text_width(time_str)) * scale;
     const float x = (static_cast<float>(width) - text_w) * 0.5f;
-    const float y = 4.0f * scale;
+    // The original draws the clock at y = roofbmpheight + 2 (frame.c): with the
+    // cockpit panel shown the roof strip pushes it down, otherwise it stays at
+    // the top of the view.
+    const int roof_rows =
+        (dashboard_on_ && dashboard_.valid()) ? dashboard_.roof_height() : 0;
+    const float y = static_cast<float>(std::max(4, roof_rows + 2)) * scale;
     append_text(verts, hud_font_, time_str, x + scale, y + scale, scale, hud_shadow_);
     append_text(verts, hud_font_, time_str, x, y, scale, hud_fg_);
   }
@@ -877,6 +916,22 @@ void DriveScene::draw_sky(const Camera& camera, float alpha, int width, int heig
   }
 }
 
+void DriveScene::draw_dashboard(int width, int height) {
+  if (!dashboard_on_ || !dashboard_.valid()) return;
+  world::DashboardRects r;
+  if (!world::dashboard_rects(dashboard_, width, height, &r)) return;
+
+  // Drawn last so the opaque panel hides the world and HUD outside the
+  // windshield (the original composites the dashboard over the 3D band).
+  std::vector<Vertex> verts;
+  append_textured_quad(verts, r.dash_x, r.dash_y, r.dash_w, r.dash_h);
+  sprites_.draw(dashboard_textures_[0], verts, width, height);
+
+  verts.clear();
+  append_textured_quad(verts, r.roof_x, r.roof_y, r.roof_w, r.roof_h);
+  sprites_.draw(dashboard_textures_[1], verts, width, height);
+}
+
 void DriveScene::render(Renderer& renderer, int width, int height) {
   const float alpha = render_alpha();
   // Interpolate the follow camera alongside the car so the two stay locked.
@@ -909,6 +964,10 @@ void DriveScene::render(Renderer& renderer, int width, int height) {
   std::vector<Vertex> hud;
   build_hud(hud, width, height, has_car_rect ? &car_rect : nullptr);
   hud_.draw(hud, width, height);
+
+  // The cockpit panel goes last so it masks the world and HUD outside the
+  // windshield (seg005.asm loop_game composites it over the 3D band).
+  draw_dashboard(width, height);
 
   ++frame_index_;
   if (!screenshot_path_.empty() && frame_index_ >= screenshot_frame_) {

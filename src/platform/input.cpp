@@ -10,6 +10,7 @@ void Input::begin_frame() {
   controls_.gear_down = false;
   controls_.reset_car = false;
   controls_.toggle_camera = false;
+  controls_.toggle_dashboard = false;
   controls_.pause = false;
   mouse_dx_ = mouse_dy_ = 0.0f;
 
@@ -36,6 +37,10 @@ void Input::handle_event(const SDL_Event& e) {
       case SDLK_x: controls_.gear_up = true; break;
       case SDLK_r: controls_.reset_car = true; break;
       case SDLK_c: controls_.toggle_camera = true; break;
+      // The original toggles the cockpit dashboard with 'D' (seg005.asm
+      // handle_ingame_kb_shortcuts); the port maps A/D to steering, so TAB is
+      // used instead.
+      case SDLK_TAB: controls_.toggle_dashboard = true; break;
       case SDLK_p: controls_.pause = true; break;
       default: break;
     }

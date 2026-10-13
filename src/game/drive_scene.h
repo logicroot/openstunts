@@ -24,6 +24,7 @@
 #include "render/sprite_renderer.h"
 #include "render/texture.h"
 #include "world/car_mesh.h"
+#include "world/dashboard.h"
 #include "world/skybox.h"
 #include "world/track_shapes.h"
 
@@ -63,6 +64,11 @@ class DriveScene : public Scene {
   // world (seg003.asm skybox_op / skybox_op_helper2). No-op when the skybox
   // asset is absent.
   void draw_sky(const Camera& camera, float alpha, int width, int height);
+
+  // Draws the cockpit dashboard panel (STDA<ID>.PVS "roof" + "dash") opaquely
+  // over the screen bands outside the windshield. No-op when the dashboard is
+  // hidden or the asset was not loaded.
+  void draw_dashboard(int width, int height);
 
   // Screen row (pixels, top-left origin) of the horizon for `camera`: the
   // projection of the world-horizontal direction, i.e. where the view ray is
@@ -139,6 +145,14 @@ class DriveScene : public Scene {
   SpriteRenderer sprites_;
   glm::vec4 sky_color_{0.55f, 0.72f, 0.92f, 1.0f};
   glm::vec4 ground_color_{0.14f, 0.41f, 0.13f, 1.0f};
+
+  // Cockpit dashboard (seg005.asm setup_car_shapes / loop_game): the car's
+  // STDA<ID>.PVS "dash"/"roof" panels, drawn opaquely over the lower/upper
+  // screen bands. `dashb_toggle` is 1 (shown) for a normal race; the panel hides
+  // the world outside the windshield and the HUD clock moves below the roof.
+  world::Dashboard dashboard_;
+  Texture dashboard_textures_[2];  // [0] = dash, [1] = roof
+  bool dashboard_on_ = true;
 
   std::string screenshot_path_;
   int screenshot_frame_ = 0;
