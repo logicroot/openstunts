@@ -43,7 +43,7 @@ void SpriteRenderer::shutdown() {
 }
 
 void SpriteRenderer::draw(const Texture& texture, const std::vector<Vertex>& verts,
-                          int drawable_width, int drawable_height) {
+                          int drawable_width, int drawable_height, bool blend) {
   if (verts.empty() || !texture.valid() || drawable_width <= 0 ||
       drawable_height <= 0) {
     return;
@@ -52,7 +52,14 @@ void SpriteRenderer::draw(const Texture& texture, const std::vector<Vertex>& ver
 
   glDisable(GL_DEPTH_TEST);
   glDisable(GL_CULL_FACE);
-  glDisable(GL_BLEND);
+  if (blend) {
+    // Straight alpha: transparent texels (alpha 0) leave the destination alone,
+    // which is what the cockpit's AND/OR overlay blits need.
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  } else {
+    glDisable(GL_BLEND);
+  }
   shader_.use();
   const glm::mat4 ortho = glm::ortho(0.0f, static_cast<float>(drawable_width),
                                      static_cast<float>(drawable_height), 0.0f,

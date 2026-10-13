@@ -59,6 +59,27 @@ bool load_dashboard(const std::string& asset_dir, const std::string& car_id,
   if (!have_ins2) S3D_WARN("dashboard: %s is missing the ins2 instrument face", pvs.c_str());
   if (!have_gbox) S3D_WARN("dashboard: %s is missing the gbox gear-selector plate", pvs.c_str());
 
+  // The turned-wheel face patches and their stencils come from the same archive
+  // (loc_234BE/loc_234EC: "ins1"/"ins3" masked by "inm1"/"inm3"). They are in
+  // the instrument face's coordinate space, so they need ins2 to place them.
+  static const char* kPatchIds[2] = {"ins1", "ins3"};
+  static const char* kPatchMaskIds[2] = {"inm1", "inm3"};
+  for (int i = 0; i < 2; ++i) {
+    const bool have_patch = load_sprite2d(pvs, kPatchIds[i], &out->ins_patch[i]);
+    const bool have_mask = load_sprite2d(pvs, kPatchMaskIds[i], &out->ins_mask[i]);
+    out->patches_loaded[i] = have_patch && have_mask;
+    if (!out->patches_loaded[i]) {
+      S3D_WARN("dashboard: %s is missing the %s/%s wheel patch", pvs.c_str(),
+               kPatchIds[i], kPatchMaskIds[i]);
+    }
+  }
+
+  // The per-frame "dast" strip and its "dasm" stencil (loc_22F18): only the cars
+  // whose "dash" starts below y=130 split the panel this way.
+  const bool have_dast = load_sprite2d(pvs, "dast", &out->dast);
+  const bool have_dasm = load_sprite2d(pvs, "dasm", &out->dast_mask);
+  out->dast_loaded = have_dast && have_dasm;
+
   // The moving parts (gear lever knob and steering dot) live in STDB<carid>.PVS
   // (loc_22E10: locate_many_resources "gnobgnabdotdotadot1dot2").
   const std::string pvs_b = path_join(asset_dir, "STDB" + id + ".PVS");
@@ -69,15 +90,27 @@ bool load_dashboard(const std::string& asset_dir, const std::string& car_id,
   if (!have_knob) S3D_WARN("dashboard: %s is missing the gnob gear lever", pvs_b.c_str());
   if (!have_dot) S3D_WARN("dashboard: %s is missing the dot indicator", pvs_b.c_str());
 
+  // The digital speedometer glyphs also come from STDB (loc_2105:
+  // locate_many_resources "dig0dig1...dig9"). Only the cars whose SIMD marks the
+  // speedometer digital carry them.
+  int digits = 0;
+  for (int i = 0; i < 10; ++i) {
+    const std::string digit_id = "dig" + std::to_string(i);
+    if (load_sprite2d(pvs_b, digit_id.c_str(), &out->digit[i])) ++digits;
+  }
+  out->digits_loaded = (digits == 10);
+
   // `instruments_loaded` gates the needle overlay: the needle geometry is a
   // property of the car's SIMD data, so the origin (`ins2`) alone decides.
   out->instruments_loaded = have_ins2;
 
   S3D_INFO("dashboard: STDA%s.PVS dash %dx%d at y=%d, roof height %d, %d wheel(s), "
-           "ins2 %d, gbox %d, gnob %d, dot %d",
+           "ins2 %d, gbox %d, gnob %d, dot %d, patch %d/%d, digits %d, dast %d",
            id.c_str(), out->dash.width, out->dash.height, out->dash.pos_y,
            out->roof.height, wheels, have_ins2 ? 1 : 0, have_gbox ? 1 : 0,
-           have_knob ? 1 : 0, have_dot ? 1 : 0);
+           have_knob ? 1 : 0, have_dot ? 1 : 0,
+           out->patches_loaded[0] ? 1 : 0, out->patches_loaded[1] ? 1 : 0,
+           digits, out->dast_loaded ? 1 : 0);
   return true;
 }
 
@@ -127,6 +160,38 @@ SpeedoKind dashboard_speedo_kind(int16_t center_y) {
   return SpeedoKind::Analog;
 }
 
+void dashboard_digital_digits(int32_t speed, SpeedoDigit out[3]) {
+  if (out == nullptr) return;
+  // loc_233A2: si = car_speed >> 8 (a 16-bit logical shift of the low word).
+  int si = static_cast<int>(static_cast<uint16_t>(speed & 0xFFFF) >> 8);
+  // loc_2338C: the hundreds glyph, then subtract it from the reading.
+  int hundreds = 0;
+  if (si >= 200) {
+    hundreds = 2;
+    si -= 200;
+  } else if (si >= 100) {
+    hundreds = 1;
+    si -= 100;
+  }
+  bool drawn = false;
+  out[0].slot = 0;
+  out[0].value = hundreds;
+  out[0].shown = (hundreds != 0);
+  if (out[0].shown) drawn = true;
+  // loc_233EA: the tens glyph, suppressed only while nothing has been drawn.
+  const int tens = si / 10;
+  out[1].slot = 1;
+  out[1].value = tens;
+  out[1].shown = (tens != 0) || drawn;
+  if (out[1].shown) {
+    si -= tens * 10;
+  }
+  // loc_23433: the ones glyph is always stamped.
+  out[2].slot = 2;
+  out[2].value = si;
+  out[2].shown = true;
+}
+
 int dashboard_steer_dot_index(int16_t steering_angle, int num_points) {
   if (num_points <= 0) return -1;
   // loc_235C5: the dot index is |steering value|.
@@ -173,6 +238,35 @@ bool dashboard_rects(const Dashboard& d, int width, int height,
   r.instrument_y = static_cast<float>(d.ins2.pos_y) * sy;
   r.instrument_w = static_cast<float>(d.ins2.width) * sx;
   r.instrument_h = static_cast<float>(d.ins2.height) * sy;
+
+  // The turned-wheel face patches are anchored at the instrument face's origin:
+  // the original stamps them into the face-sized window (loc_234BE/loc_234EC).
+  for (int i = 0; i < 2; ++i) {
+    const Sprite2D& p = d.ins_patch[i];
+    const Sprite2D& m = d.ins_mask[i];
+    r.has_patch[i] = d.patches_loaded[i] && p.valid();
+    r.patch_x[i] = static_cast<float>(d.ins2.pos_x + p.pos_x) * sx;
+    r.patch_y[i] = static_cast<float>(d.ins2.pos_y + p.pos_y) * sy;
+    r.patch_w[i] = static_cast<float>(p.width) * sx;
+    r.patch_h[i] = static_cast<float>(p.height) * sy;
+    r.has_patch_mask[i] = d.patches_loaded[i] && m.valid();
+    r.patch_mask_x[i] = static_cast<float>(d.ins2.pos_x + m.pos_x) * sx;
+    r.patch_mask_y[i] = static_cast<float>(d.ins2.pos_y + m.pos_y) * sy;
+    r.patch_mask_w[i] = static_cast<float>(m.width) * sx;
+    r.patch_mask_h[i] = static_cast<float>(m.height) * sy;
+  }
+
+  // The per-frame "dast" strip is authored in absolute screen coordinates.
+  r.has_dast = d.dast_loaded && d.dast.valid();
+  r.dast_x = static_cast<float>(d.dast.pos_x) * sx;
+  r.dast_y = static_cast<float>(d.dast.pos_y) * sy;
+  r.dast_w = static_cast<float>(d.dast.width) * sx;
+  r.dast_h = static_cast<float>(d.dast.height) * sy;
+  r.has_dast_mask = d.dast_loaded && d.dast_mask.valid();
+  r.dast_mask_x = static_cast<float>(d.dast_mask.pos_x) * sx;
+  r.dast_mask_y = static_cast<float>(d.dast_mask.pos_y) * sy;
+  r.dast_mask_w = static_cast<float>(d.dast_mask.width) * sx;
+  r.dast_mask_h = static_cast<float>(d.dast_mask.height) * sy;
 
   r.has_gear_box = d.gear_box.valid();
   r.gear_box_x = static_cast<float>(d.gear_box.pos_x) * sx;

@@ -275,6 +275,56 @@ TEST(dashboard_point_at_reads_byte_pairs) {
   world::dashboard_point_at(points, 0, nullptr, nullptr);  // must not crash
 }
 
+TEST(dashboard_digital_digits_matches_asm) {
+  // loc_2338C/loc_233A2: si = car_speed >> 8, then the hundreds glyph (2/1/0),
+  // the tens and finally the ones, with leading zeros suppressed. `slot` is the
+  // glyph's spdpoints index; the ones glyph is always stamped.
+  world::SpeedoDigit d[3];
+  world::dashboard_digital_digits(0, d);
+  EXPECT_TRUE(!d[0].shown && !d[1].shown && d[2].shown);
+  EXPECT_EQ(d[2].value, 0);
+  EXPECT_EQ(d[0].slot, 0);
+  EXPECT_EQ(d[1].slot, 1);
+  EXPECT_EQ(d[2].slot, 2);
+
+  // The shift drops the low byte (2^8 * mph units): 2504 >> 8 == 9.
+  world::dashboard_digital_digits(9 * 256 + 200, d);
+  EXPECT_TRUE(!d[0].shown && !d[1].shown);
+  EXPECT_EQ(d[2].value, 9);
+
+  world::dashboard_digital_digits(42 * 256, d);
+  EXPECT_TRUE(!d[0].shown);
+  EXPECT_TRUE(d[1].shown);
+  EXPECT_EQ(d[1].value, 4);
+  EXPECT_EQ(d[2].value, 2);
+
+  world::dashboard_digital_digits(99 * 256, d);
+  EXPECT_TRUE(!d[0].shown);
+  EXPECT_EQ(d[1].value, 9);
+  EXPECT_EQ(d[2].value, 9);
+
+  // From 100 the hundreds glyph appears and the tens is drawn even when zero.
+  world::dashboard_digital_digits(100 * 256, d);
+  EXPECT_TRUE(d[0].shown);
+  EXPECT_EQ(d[0].value, 1);
+  EXPECT_TRUE(d[1].shown);
+  EXPECT_EQ(d[1].value, 0);
+  EXPECT_EQ(d[2].value, 0);
+
+  world::dashboard_digital_digits(199 * 256, d);
+  EXPECT_EQ(d[0].value, 1);
+  EXPECT_EQ(d[1].value, 9);
+  EXPECT_EQ(d[2].value, 9);
+
+  // The reading saturates at the 8-bit `si`: 255 -> "255", never a 3rd digit.
+  world::dashboard_digital_digits(255 * 256, d);
+  EXPECT_EQ(d[0].value, 2);
+  EXPECT_EQ(d[1].value, 5);
+  EXPECT_EQ(d[2].value, 5);
+
+  world::dashboard_digital_digits(0, nullptr);  // must not crash
+}
+
 TEST(dashboard_rects_instruments_and_gear) {
   world::Dashboard d = synthetic_dashboard();
   d.ins2.width = 136;
@@ -346,6 +396,91 @@ TEST(dashboard_rects_instruments_and_gear) {
   EXPECT_EQ(r.gear_box_x, 0.0f);
 }
 
+TEST(dashboard_rects_patches_and_dast) {
+  world::Dashboard d = synthetic_dashboard();
+  d.ins2.width = 136;
+  d.ins2.height = 39;
+  d.ins2.pos_x = 64;
+  d.ins2.pos_y = 148;
+  d.ins2.pixels.assign(136 * 39, 0);
+  // ins1/ins3 ("turned wheel") are panel-local; inm1/inm3 clear a row above.
+  d.ins_patch[0].width = 72;
+  d.ins_patch[0].height = 18;
+  d.ins_patch[0].pos_x = 64;
+  d.ins_patch[0].pos_y = 21;
+  d.ins_patch[0].pixels.assign(72 * 18, 0);
+  d.ins_mask[0].width = 72;
+  d.ins_mask[0].height = 19;
+  d.ins_mask[0].pos_x = 64;
+  d.ins_mask[0].pos_y = 20;
+  d.ins_mask[0].pixels.assign(72 * 19, 0);
+  d.ins_patch[1].width = 72;
+  d.ins_patch[1].height = 18;
+  d.ins_patch[1].pos_x = 0;
+  d.ins_patch[1].pos_y = 21;
+  d.ins_patch[1].pixels.assign(72 * 18, 0);
+  d.ins_mask[1].width = 72;
+  d.ins_mask[1].height = 19;
+  d.ins_mask[1].pos_x = 0;
+  d.ins_mask[1].pos_y = 20;
+  d.ins_mask[1].pixels.assign(72 * 19, 0);
+  d.patches_loaded[0] = true;
+  d.patches_loaded[1] = true;
+  // dast/dasm are absolute 320x8 strips at y=130.
+  d.dast.width = 320;
+  d.dast.height = 8;
+  d.dast.pos_x = 0;
+  d.dast.pos_y = 130;
+  d.dast.pixels.assign(320 * 8, 0);
+  d.dast_mask = d.dast;
+  d.dast_loaded = true;
+
+  world::DashboardRects r;
+  EXPECT_TRUE(world::dashboard_rects(d, 320, 200, &r));
+  EXPECT_TRUE(r.has_patch[0]);
+  EXPECT_EQ(r.patch_x[0], 128.0f);  // ins2.x (64) + ins1.x (64)
+  EXPECT_EQ(r.patch_y[0], 169.0f);  // ins2.y (148) + ins1.y (21)
+  EXPECT_EQ(r.patch_w[0], 72.0f);
+  EXPECT_EQ(r.patch_h[0], 18.0f);
+  EXPECT_TRUE(r.has_patch_mask[0]);
+  EXPECT_EQ(r.patch_mask_x[0], 128.0f);
+  EXPECT_EQ(r.patch_mask_y[0], 168.0f);  // one row higher than the patch
+  EXPECT_EQ(r.patch_mask_h[0], 19.0f);
+  EXPECT_TRUE(r.has_patch[1]);
+  EXPECT_EQ(r.patch_x[1], 64.0f);
+  EXPECT_EQ(r.patch_y[1], 169.0f);
+  EXPECT_TRUE(r.has_patch_mask[1]);
+  EXPECT_EQ(r.patch_mask_x[1], 64.0f);
+  EXPECT_EQ(r.patch_mask_y[1], 168.0f);
+  EXPECT_TRUE(r.has_dast);
+  EXPECT_EQ(r.dast_x, 0.0f);
+  EXPECT_EQ(r.dast_y, 130.0f);
+  EXPECT_EQ(r.dast_w, 320.0f);
+  EXPECT_EQ(r.dast_h, 8.0f);
+  EXPECT_TRUE(r.has_dast_mask);
+  EXPECT_EQ(r.dast_mask_y, 130.0f);
+
+  // 640x400 doubles both axes.
+  EXPECT_TRUE(world::dashboard_rects(d, 640, 400, &r));
+  EXPECT_EQ(r.patch_x[0], 256.0f);
+  EXPECT_EQ(r.patch_y[0], 338.0f);
+  EXPECT_EQ(r.patch_mask_y[0], 336.0f);
+  EXPECT_EQ(r.dast_y, 260.0f);
+  EXPECT_EQ(r.dast_h, 16.0f);
+
+  // Without the optional sprites the flags stay false and their rects are zero.
+  const world::Dashboard plain = synthetic_dashboard();
+  EXPECT_TRUE(world::dashboard_rects(plain, 320, 200, &r));
+  EXPECT_TRUE(!r.has_patch[0]);
+  EXPECT_TRUE(!r.has_patch_mask[0]);
+  EXPECT_TRUE(!r.has_patch[1]);
+  EXPECT_TRUE(!r.has_dast);
+  EXPECT_TRUE(!r.has_dast_mask);
+  EXPECT_EQ(r.patch_x[0], 0.0f);
+  EXPECT_EQ(r.patch_mask_y[0], 0.0f);
+  EXPECT_EQ(r.dast_y, 0.0f);
+}
+
 TEST(dashboard_load_player_car_instruments) {
   const std::string dir = find_asset_dir();
   if (dir.empty()) {
@@ -380,4 +515,60 @@ TEST(dashboard_load_player_car_instruments) {
   EXPECT_EQ(d.steer_dot.height, 4);
   EXPECT_EQ(d.steer_dot.pivot_x, 5);
   EXPECT_EQ(d.steer_dot.pivot_y, 2);
+  // The turned-wheel patches ("ins1"/"ins3" + "inm1"/"inm3" stencils) are
+  // panel-local; the COUN's patch sits at (64,21)/(0,21) with its stencil one
+  // row above.
+  EXPECT_TRUE(d.patches_loaded[0]);
+  EXPECT_TRUE(d.patches_loaded[1]);
+  EXPECT_EQ(d.ins_patch[0].width, 72);
+  EXPECT_EQ(d.ins_patch[0].height, 18);
+  EXPECT_EQ(d.ins_patch[0].pos_x, 64);
+  EXPECT_EQ(d.ins_patch[0].pos_y, 21);
+  EXPECT_EQ(d.ins_mask[0].width, 72);
+  EXPECT_EQ(d.ins_mask[0].height, 19);
+  EXPECT_EQ(d.ins_mask[0].pos_y, 20);
+  EXPECT_EQ(d.ins_patch[1].width, 72);
+  EXPECT_EQ(d.ins_patch[1].pos_x, 0);
+  EXPECT_EQ(d.ins_patch[1].pos_y, 21);
+  EXPECT_EQ(d.ins_mask[1].pos_y, 20);
+  // The COUN has an analog speedometer and a "dash" that already starts at
+  // y=130, so it has neither the digital glyphs nor a "dast" strip.
+  EXPECT_TRUE(!d.digits_loaded);
+  EXPECT_TRUE(!d.dast_loaded);
+}
+
+TEST(dashboard_load_digital_and_dast) {
+  const std::string dir = find_asset_dir();
+  if (dir.empty()) {
+    std::printf("  (skipped: no Stunts asset dir found)\n");
+    return;
+  }
+  // VETT is the digital-speedometer car: its SIMD spdcenter.y is 0, so its
+  // STDB archive carries the ten 8x7 "dig" glyphs (seg005.asm loc_2105).
+  world::Dashboard v;
+  if (world::load_dashboard(dir, "VETT", &v)) {
+    EXPECT_TRUE(v.digits_loaded);
+    EXPECT_EQ(v.digit[0].width, 8);
+    EXPECT_EQ(v.digit[0].height, 7);
+    EXPECT_EQ(v.digit[9].width, 8);
+    EXPECT_EQ(v.digit[9].height, 7);
+    EXPECT_TRUE(v.patches_loaded[0]);
+    EXPECT_EQ(v.ins_patch[0].width, 72);
+    EXPECT_EQ(v.ins_patch[0].height, 23);
+  } else {
+    std::printf("  (skipped: STDAVETT.PVS not found)\n");
+  }
+  // JAGU's "dash" starts at y=138, so the panel band is split: a "dast" strip
+  // covers the y=130..138 gap (loc_22F18). It has no digital glyphs.
+  world::Dashboard j;
+  if (world::load_dashboard(dir, "JAGU", &j)) {
+    EXPECT_TRUE(j.dast_loaded);
+    EXPECT_EQ(j.dast.width, 320);
+    EXPECT_EQ(j.dast.height, 8);
+    EXPECT_EQ(j.dast.pos_y, 130);
+    EXPECT_TRUE(j.dast_mask.valid());
+    EXPECT_TRUE(!j.digits_loaded);
+  } else {
+    std::printf("  (skipped: STDAJAGU.PVS not found)\n");
+  }
 }

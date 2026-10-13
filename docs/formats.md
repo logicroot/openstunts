@@ -217,10 +217,10 @@ in the original's default view (`dashb_toggle = 1`, `seg005.asm`
 | `roof` | 320×9 | (0,0) | the cockpit frame; `s2d_height` is `roofbmpheight` |
 | `whl1`/`whl2`/`whl3` | 184×32 | (40,168) | steering wheel: turned left / centred / turned right |
 | `gbox` | 64×56 | (256,144) | the gear-box gauge (animated) |
-| `ins1`/`ins3` | 72×18 | (64,21)/(0,21) | indicator strips across the top of the panel |
+| `ins1`/`ins3` | 72×18 | (64,21)/(0,21) | turned-wheel face patches (wheel held left / right) |
 | `ins2` | 136×39 | (64,148) | the instrument face (speedometer + tachometer dials) |
-| `inm1`/`inm3` | 72×19 | | indicator masks |
-| `dast`/`dasm` | | | tachometer needle and mask (older cars only; not in `COUN`) |
+| `inm1`/`inm3` | 72×19 | (64,20)/(0,20) | the patches' AND stencils, one row above the patch |
+| `dast`/`dasm` | 320×8 | (0,130) | per-frame band filling the gap above the panel (JAGU/P962/PMIN only) |
 
 The gear-box face `gbox` (64×56 at (256,144)) and the gear lever
 (`gnob`, `gnab` and the `dot`/`dota`/`dot1`/`dot2` steering dots) live in the
@@ -228,9 +228,12 @@ companion archive `STDB<car>.PVS`.
 
 The original renders the 3D world inside `rect_windshield =
 [roofbmpheight, dashbmp_y]` and composites the panel over the rest. The port
-draws, in this order, `dash` → steering wheel → `ins2` → needles → `gbox` →
-gear knob → steering dot → `roof`. All of the panel art is blitted opaquely,
-so later pieces hide earlier ones where they overlap. In particular:
+draws, in this order, `dash` → `dast` → steering wheel → `ins2` → digital
+glyphs → needles → turned-wheel patch → `gbox` → gear knob → steering dot →
+`roof`. The panel art is blitted opaquely, so later pieces hide earlier ones
+where they overlap; the `dast`/digital/patch overlays are alpha-blended instead
+(their transparent and palette-index-0 texels leave the destination alone,
+matching the engine's OR/AND blits). In particular:
 
 * The steering wheel is picked from `whl1`/`whl2`/`whl3` by the steering angle
   (`seg005.asm loc_2319D`: `trunc(angle/8)` against a ±10 dead zone), then
@@ -286,8 +289,32 @@ is drawn at `steeringdots[i]` with its x mirrored about `steeringdots[0].x`
 (`2*steeringdots[0].x - x`) when steering left. Note the resource id is the
 four-character `"dot "` (trailing space).
 
-The digital speed readout (`dig0`..`dig9`) and the `dast`/`dasm` older-car
-tachometer overlay are not drawn yet.
+#### Digital readout, `dast` strip and turned-wheel patches
+
+The digital speedometer (only the Vetty, `spdcenter.y == 0`) stamps up to three
+8x7 glyphs from `STDB<car>.PVS` (`"dig0"`..`"dig9"`, located at loc_2105).
+`loc_2338C`/loc_233A2 split the reading `si = car_speed >> 8`:
+
+* **hundreds** — `2` for `si >= 200`, `1` for `si >= 100`, else suppressed (and
+  subtracted from `si`);
+* **tens** — `si / 10`, suppressed only while nothing has been drawn yet;
+* **ones** — `si % 10`, always stamped.
+
+Each glyph is an OR-blit in which palette index 0 is a no-op, so the suppressed
+leading columns leave the face untouched; the k-th glyph reads the k-th byte
+pair of `spdpoints` (anchored at the `ins2` origin).
+
+The turned-wheel patches `ins1`/`ins3` (same `STDA<car>.PVS`) are panel-local
+like the needles. They are stamped into the face-sized window with their
+`inm1`/`inm3` stencils whenever the wheel is held left/right
+(`dashboard_wheel_index`): the stencil ANDs a black region — a row taller than
+the patch — and the patch ORs its colours back. The stencil's index 0 is opaque
+black while the patch's index 0 is a no-op, so the face shows through wherever
+the stencil is transparent.
+
+The `dast` strip (with its `dasm` stencil) is present only on the cars whose
+`dash` starts below y=130 (JAGU, P962, PMIN): a 320-wide absolute-coordinate
+band at (0,130) that fills the gap above the panel.
 
 ## Track assembly (`.TRK` → geometry)
 

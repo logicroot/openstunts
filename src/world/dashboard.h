@@ -10,8 +10,14 @@
 //                              `roofbmpheight`
 //   "whl1"/"whl2"/"whl3" 184x32 at (40,168)  steering wheel: turned left,
 //                              centred, turned right (loc_2319D)
+//   "ins1"/"ins3"  panel-space patches stamped over the face when the wheel is
+//                  held left / right (loc_234BE / loc_234EC), with the matching
+//                  "inm1"/"inm3" stencils
+//   "dast"  a per-frame strip at (0,130) plus its "dasm" stencil, present on the
+//           cars whose "dash" starts lower (loc_22F18)
 //   "ins2"  136x39 at (64,148) the speedometer/tachometer face; its top-left
-//                              is the origin the needle coordinates use
+//                              is the origin the needle *and* patch coordinates
+//                              use (the face is drawn into a car-sized window)
 //   "gbox"  64x56  at (256,144) the gear-selector plate; CARSTATE.car_knob_x/y
 //                              are offsets from its top-left
 //
@@ -19,15 +25,22 @@
 //
 //   "gnob"  24x23  the gear lever knob (pivot at its centre)
 //   "dot"   8x4    the steering-position indicator (pivot (5,2))
+//   "dig0".."dig9" 8x7 digital speedometer glyphs, loaded only for the cars
+//                  whose SIMD classifies the speedometer as digital
 //
 // The original sets rect_windshield = [roofbmpheight, dashbmp_y], renders the
 // 3D world inside that band and composites the panel over the rest. The
 // speedometer and tachometer needles are single-colour lines
 // (`meter_needle_color`, palette 15) from `spdcenter`/`revcenter` to the point
 // indexed by the rev-coupled speed (`car_speed` / 640) and `car_currpm` (>> 7)
-// (seg005.asm loc_23299 / loc_232BC). The digital-speed variant used by older
-// cars (`spdcenter.y == 0`) and the alternate "dast"/"dasm" tachometer are not
-// wired up yet.
+// (seg005.asm loc_23299 / loc_232BC); cars with a digital readout
+// (`spdcenter.y == 0`) stamp glyphs at `spdpoints[0..5]` instead (loc_233A2).
+//
+// The "ins"/"inm" and "dast"/"dasm" pairs are OR-blits paired with an AND
+// stencil: the mask clears its opaque pixels to black (the file stores them as
+// palette index 0) and the shape then writes its own pixels, with palette index
+// 0 acting as a no-op. Reproducing the visible result therefore means drawing
+// the stencil opaquely and the shape with index 0 treated as transparent.
 //
 // Reference: seg005.asm setup_car_shapes, loop_game and c/restunts.c run_game.
 
@@ -43,11 +56,22 @@ struct Dashboard {
   Sprite2D dash;      // "dash" (bottom panel); pos_y = dashbmp_y
   Sprite2D wheel[3];  // "whl1"/"whl2"/"whl3" = turned-left / centred / turned-right
   Sprite2D ins2;      // "ins2" instrument face; top-left anchors the needles
+  // The turned-wheel face patches: [0] = "ins1" (wheel held left), [1] = "ins3"
+  // (held right). Their s2d_pos_x/y are in the *face's* coordinate space, i.e.
+  // relative to ins2's top-left (the game draws them into a face-sized window).
+  Sprite2D ins_patch[2];
+  Sprite2D ins_mask[2];  // "inm1"/"inm3" AND stencils for ins_patch
+  Sprite2D digit[10];    // "dig0".."dig9" digital speedometer glyphs (STDB)
+  Sprite2D dast;         // "dast" per-frame strip (absolute screen coords)
+  Sprite2D dast_mask;    // "dasm" AND stencil for dast
   Sprite2D gear_box;  // "gbox" gear-selector plate; top-left anchors the knob
   Sprite2D gear_knob; // "gnob" gear lever knob (STDB<carid>.PVS)
   Sprite2D steer_dot; // "dot" steering-position indicator (STDB<carid>.PVS)
   bool wheels_loaded = false;
   bool instruments_loaded = false;
+  bool patches_loaded[2] = {false, false};
+  bool digits_loaded = false;
+  bool dast_loaded = false;
   bool loaded = false;
 
   bool valid() const { return loaded; }
@@ -100,6 +124,21 @@ int dashboard_rev_index(int16_t rpm, int num_points);
 enum class SpeedoKind { Analog, Digital, None };
 SpeedoKind dashboard_speedo_kind(int16_t center_y);
 
+// One glyph of the digital speedometer (seg005.asm loc_2338C..loc_23433): the
+// digit `value`, the SIMD spdpoints slot its top-left is drawn at (0 =
+// spdpoints[0..1], 1 = [2..3], 2 = [4..5]), and whether the original stamps it
+// (leading zeros are suppressed below 100/10).
+struct SpeedoDigit {
+  int value;
+  int slot;
+  bool shown;
+};
+
+// Splits `speed` (CARSTATE.car_speed, authored as 2^8 * mph) into the three
+// glyphs the original shows. Always fills all three entries (hundreds, tens,
+// ones) in draw order.
+void dashboard_digital_digits(int32_t speed, SpeedoDigit out[3]);
+
 // Index into the steering-dot list (SIMD "steeringdots") for `steering_angle`:
 // |steering value| clamped to the last entry, or -1 when the list is empty.
 int dashboard_steer_dot_index(int16_t steering_angle, int num_points);
@@ -130,12 +169,41 @@ struct DashboardRects {
   float wheel_w;
   float wheel_h;
   // The instrument face ("ins2"): its top-left is the origin the needle
-  // coordinates (SIMD spdcenter/spdpoints/revcenter/revpoints) are relative to.
+  // coordinates (SIMD spdcenter/spdpoints/revcenter/revpoints) and the
+  // turned-wheel patches are relative to.
   bool has_instruments;
   float instrument_x;
   float instrument_y;
   float instrument_w;
   float instrument_h;
+  // The turned-wheel face patches ("ins1"/"ins3"), anchored at the face origin
+  // like the needles. [0] is the wheel-held-left patch, [1] the right one.
+  bool has_patch[2];
+  float patch_x[2];
+  float patch_y[2];
+  float patch_w[2];
+  float patch_h[2];
+  // The matching AND stencils ("inm1"/"inm3"): they clear to black a region that
+  // can be a row taller than the patch itself, so they carry their own rects.
+  bool has_patch_mask[2];
+  float patch_mask_x[2];
+  float patch_mask_y[2];
+  float patch_mask_w[2];
+  float patch_mask_h[2];
+  // The per-frame "dast" strip and its "dasm" stencil: authored in absolute
+  // screen coordinates (their own pos_x/pos_y, unlike the face patches),
+  // stamped over the top of the panel band on the cars whose "dash" starts
+  // below it.
+  bool has_dast;
+  float dast_x;
+  float dast_y;
+  float dast_w;
+  float dast_h;
+  bool has_dast_mask;
+  float dast_mask_x;
+  float dast_mask_y;
+  float dast_mask_w;
+  float dast_mask_h;
   // The gear-selector plate ("gbox"): CARSTATE.car_knob_x/y are offsets from
   // its top-left.
   bool has_gear_box;

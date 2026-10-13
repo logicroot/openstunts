@@ -400,12 +400,15 @@ bool DriveScene::on_enter() {
   if (have_palette && !asset_dir_.empty() &&
       world::load_dashboard(asset_dir_, kPlayerCarId, &dashboard_)) {
     // Palette indices -> RGBA. The RLE decoder leaves skipped (transparent) runs
-    // as 0xFF; the cockpit panels are opaque, so leave those pixels clear.
-    const auto upload_sprite = [this](const Sprite2D& s, Texture* tex) {
+    // as 0xFF; the cockpit panels are opaque, so leave those pixels clear. The
+    // OR-blits (turned-wheel patches, digits, "dast") additionally treat palette
+    // index 0 as a no-op, so `transparent_index` lets them keep it clear too.
+    const auto upload_sprite = [this](const Sprite2D& s, Texture* tex,
+                                      uint8_t transparent_index = 0xFF) {
       std::vector<uint8_t> rgba(s.pixels.size() * 4);
       for (size_t p = 0; p < s.pixels.size(); ++p) {
         const uint8_t idx = s.pixels[p];
-        if (idx == 0xFF) continue;  // already zeroed
+        if (idx == 0xFF || idx == transparent_index) continue;  // already zeroed
         const uint8_t* c = palette_.rgb8[idx];
         rgba[p * 4 + 0] = c[0];
         rgba[p * 4 + 1] = c[1];
@@ -433,6 +436,23 @@ bool DriveScene::on_enter() {
     }
     if (dashboard_.steer_dot.valid()) {
       upload_sprite(dashboard_.steer_dot, &dashboard_dot_texture_);
+    }
+    // Turned-wheel patches: the stencil stamps opaquely (index 0 = black) and
+    // the patch writes its colours with index 0 as a no-op.
+    for (int i = 0; i < 2; ++i) {
+      if (dashboard_.patches_loaded[i]) {
+        upload_sprite(dashboard_.ins_mask[i], &dashboard_patch_mask_textures_[i]);
+        upload_sprite(dashboard_.ins_patch[i], &dashboard_patch_textures_[i], 0);
+      }
+    }
+    for (int i = 0; i < 10; ++i) {
+      if (dashboard_.digit[i].valid()) {
+        upload_sprite(dashboard_.digit[i], &dashboard_digit_textures_[i], 0);
+      }
+    }
+    if (dashboard_.dast_loaded) {
+      upload_sprite(dashboard_.dast_mask, &dashboard_dast_mask_texture_);
+      upload_sprite(dashboard_.dast, &dashboard_dast_texture_, 0);
     }
   } else if (have_palette) {
     S3D_WARN("dashboard: STDACOUN.PVS not found; the cockpit panel is disabled");
@@ -958,6 +978,21 @@ void DriveScene::draw_dashboard(int width, int height) {
   append_textured_quad(verts, r.dash_x, r.dash_y, r.dash_w, r.dash_h);
   sprites_.draw(dashboard_textures_[0], verts, width, height);
 
+  // The per-frame "dast" band (loc_22F18): the cars whose "dash" starts below
+  // y=130 carry a separate strip over the top of the panel area. Its "dasm"
+  // stencil clears the band, then "dast" paints it (index 0 = no-op).
+  if (r.has_dast_mask) {
+    verts.clear();
+    append_textured_quad(verts, r.dast_mask_x, r.dast_mask_y, r.dast_mask_w,
+                         r.dast_mask_h);
+    sprites_.draw(dashboard_dast_mask_texture_, verts, width, height, true);
+  }
+  if (r.has_dast) {
+    verts.clear();
+    append_textured_quad(verts, r.dast_x, r.dast_y, r.dast_w, r.dast_h);
+    sprites_.draw(dashboard_dast_texture_, verts, width, height, true);
+  }
+
   if (r.has_wheel) {
     const int index = world::dashboard_wheel_index(car_.car_steeringAngle);
     if (dashboard_.wheel[index].valid()) {
@@ -968,13 +1003,43 @@ void DriveScene::draw_dashboard(int width, int height) {
   }
 
   // The instrument face ("ins2") is stamped over the wheel's upper rows, then
-  // the needles are drawn into it (loc_2350B copies the completed face buffer).
+  // the speed readout (digital glyphs or the analog needle) and the tachometer
+  // needle are drawn into it, and finally the turned-wheel patch (loc_2350B
+  // copies the completed face buffer).
   if (r.has_instruments) {
     verts.clear();
     append_textured_quad(verts, r.instrument_x, r.instrument_y, r.instrument_w,
                          r.instrument_h);
     sprites_.draw(dashboard_instrument_texture_, verts, width, height);
+    if (world::dashboard_speedo_kind(spec_.speed_center.y) ==
+        world::SpeedoKind::Digital) {
+      draw_digital_speedo(r, width, height);
+    }
     draw_instrument_needles(r, width, height);
+    // The turned-wheel face patch (loc_234BE/loc_234EC): while the wheel is held
+    // left/right its "inm" stencil clears the region and the "ins" patch repaints
+    // it (index 0 is a no-op in the OR-blit, so it keeps the cleared black).
+    const int wheel_index = world::dashboard_wheel_index(car_.car_steeringAngle);
+    if (wheel_index == 0 || wheel_index == 2) {
+      const int patch_index = (wheel_index == 2) ? 1 : 0;
+      if (r.has_patch_mask[patch_index]) {
+        verts.clear();
+        append_textured_quad(verts, r.patch_mask_x[patch_index],
+                             r.patch_mask_y[patch_index],
+                             r.patch_mask_w[patch_index],
+                             r.patch_mask_h[patch_index]);
+        sprites_.draw(dashboard_patch_mask_textures_[patch_index], verts, width,
+                      height, true);
+      }
+      if (r.has_patch[patch_index]) {
+        verts.clear();
+        append_textured_quad(verts, r.patch_x[patch_index],
+                             r.patch_y[patch_index], r.patch_w[patch_index],
+                             r.patch_h[patch_index]);
+        sprites_.draw(dashboard_patch_textures_[patch_index], verts, width, height,
+                      true);
+      }
+    }
   }
 
   // The gear-selector plate ("gbox"), then the lever knob ("gnob") placed by its
@@ -1068,6 +1133,29 @@ void DriveScene::draw_instrument_needles(const world::DashboardRects& r,
     }
   }
   if (!lines.empty()) hud_.draw(lines, width, height);
+}
+
+void DriveScene::draw_digital_speedo(const world::DashboardRects& r, int width,
+                                     int height) {
+  if (!dashboard_.digits_loaded || !r.has_instruments) return;
+  // loc_233A2/loc_2338C: the reading is car_speed >> 8 stamped as up to three
+  // glyphs at the SIMD spdpoints[0..5] positions, relative to the face origin.
+  world::SpeedoDigit digits[3];
+  world::dashboard_digital_digits(static_cast<int32_t>(car_.car_rev_speed), digits);
+  std::vector<Vertex> verts;
+  for (const world::SpeedoDigit& d : digits) {
+    if (!d.shown || d.value < 0 || d.value > 9) continue;
+    const Sprite2D& glyph = dashboard_.digit[d.value];
+    if (!glyph.valid()) continue;
+    int px = 0, py = 0;
+    world::dashboard_point_at(spec_.speed_points, d.slot, &px, &py);
+    verts.clear();
+    append_textured_quad(verts, r.instrument_x + static_cast<float>(px) * r.scale_x,
+                         r.instrument_y + static_cast<float>(py) * r.scale_y,
+                         static_cast<float>(glyph.width) * r.scale_x,
+                         static_cast<float>(glyph.height) * r.scale_y);
+    sprites_.draw(dashboard_digit_textures_[d.value], verts, width, height, true);
+  }
 }
 
 void DriveScene::render(Renderer& renderer, int width, int height) {

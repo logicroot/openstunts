@@ -21,10 +21,12 @@ class SpriteRenderer {
   void shutdown();
 
   // `verts` are triangles in pixels; the quad's uv range selects the region of
-  // `texture` to sample. Blending is disabled (the layers are opaque, matching
-  // seg012.asm sprite_putimage_and_alt).
+  // `texture` to sample. Blending is disabled by default (the layers are opaque,
+  // matching seg012.asm sprite_putimage_and_alt). Pass `blend` for the cockpit's
+  // AND/OR overlay blits (the "inm"/"ins" pairs, the digital glyphs and "dast"),
+  // whose transparent texels must leave the destination untouched.
   void draw(const Texture& texture, const std::vector<Vertex>& verts,
-            int drawable_width, int drawable_height);
+            int drawable_width, int drawable_height, bool blend = false);
 
  private:
   Shader shader_;

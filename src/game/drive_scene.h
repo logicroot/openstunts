@@ -77,6 +77,12 @@ class DriveScene : public Scene {
   void draw_instrument_needles(const world::DashboardRects& r, int width,
                                int height);
 
+  // Stamps the digital speedometer glyphs over the instrument face (seg005.asm
+  // loc_2338C): car_speed >> 8 split into up to three "dig" glyphs at the SIMD
+  // spdpoints[0..5] positions, leading zeros suppressed. No-op when the car has
+  // an analog/absent speedometer or the glyphs were not loaded.
+  void draw_digital_speedo(const world::DashboardRects& r, int width, int height);
+
   // Screen row (pixels, top-left origin) of the horizon for `camera`: the
   // projection of the world-horizontal direction, i.e. where the view ray is
   // level. The original derives the same line from two far ground points.
@@ -167,6 +173,16 @@ class DriveScene : public Scene {
   Texture dashboard_gear_box_texture_;    // "gbox"
   Texture dashboard_knob_texture_;        // "gnob"
   Texture dashboard_dot_texture_;         // "dot"
+  // The turned-wheel face patches: [0] = "ins1" (wheel held left), [1] = "ins3"
+  // (held right), and their "inm1"/"inm3" AND stencils. The patches are OR-blits
+  // in which palette index 0 is a no-op, so their textures keep index 0
+  // transparent; the stencils are stamped opaquely (index 0 = black).
+  Texture dashboard_patch_textures_[2];
+  Texture dashboard_patch_mask_textures_[2];
+  Texture dashboard_digit_textures_[10];  // "dig0".."dig9" (STDB)
+  // The per-frame "dast" strip and its "dasm" stencil (absolute coordinates).
+  Texture dashboard_dast_texture_;
+  Texture dashboard_dast_mask_texture_;
   bool dashboard_on_ = true;
 
   std::string screenshot_path_;
