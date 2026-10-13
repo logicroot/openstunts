@@ -17,6 +17,8 @@ int main(int argc, char** argv) {
   std::string track_arg;
   std::string config_path;
   std::string car_arg;
+  std::string opp_car_arg;
+  int opp_type_arg = 0;
   std::string screenshot_path;
   int screenshot_frame = 0;
   bool top_down = false;
@@ -28,6 +30,8 @@ int main(int argc, char** argv) {
     else if (a == "--track" && i + 1 < argc) track_arg = argv[++i];
     else if (a == "--config" && i + 1 < argc) config_path = argv[++i];
     else if (a == "--car" && i + 1 < argc) car_arg = argv[++i];
+    else if (a == "--opp-car" && i + 1 < argc) opp_car_arg = argv[++i];
+    else if (a == "--opp" && i + 1 < argc) opp_type_arg = std::atoi(argv[++i]);
     else if (a == "--screenshot" && i + 1 < argc) {
       screenshot_path = argv[++i];
       if (screenshot_frame == 0) screenshot_frame = 3;
@@ -41,8 +45,8 @@ int main(int argc, char** argv) {
       std::printf(
           "Stunts3D — 3D reimplementation of Stunts\n"
           "usage: stunts3d [--assets DIR] [--track FILE.trk] [--config FILE]\n"
-          "                [--car ID] [--screenshot out.png] [--frames N]\n"
-          "                [--top] [--drive]\n");
+          "                [--car ID] [--opp-car ID] [--opp N] [--screenshot out.png]\n"
+          "                [--frames N] [--top] [--drive]\n");
       return 0;
     } else {
       S3D_WARN("unknown argument: %s", a.c_str());
@@ -52,6 +56,8 @@ int main(int argc, char** argv) {
   Config config = Config::load(config_path);
   if (!assets_arg.empty()) config.asset_dir = assets_arg;
   if (!car_arg.empty()) config.player_car = car_arg;
+  if (!opp_car_arg.empty()) config.opponent_car = opp_car_arg;
+  if (opp_type_arg > 0) config.opponent_type = opp_type_arg;
 
   const std::string asset_dir = find_asset_dir(config.asset_dir);
   const std::string track_name = !track_arg.empty() ? track_arg : config.last_track;
@@ -69,7 +75,8 @@ int main(int argc, char** argv) {
 
   if (drive) {
     auto scene = std::make_unique<DriveScene>(std::move(track), asset_dir,
-                                             config.player_car);
+                                             config.player_car, config.opponent_car,
+                                             config.opponent_type);
     if (!screenshot_path.empty()) scene->request_screenshot(screenshot_path, screenshot_frame);
     app.set_scene(std::move(scene));
   } else {

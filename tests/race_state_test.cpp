@@ -301,3 +301,26 @@ TEST(race_checkpoint_arrow_and_wrong_way_reset) {
   EXPECT_EQ(rs.field_45b, 0);
   EXPECT_EQ(rs.field_45c, 1);
 }
+
+TEST(race_spawn_delta_flanks_cars) {
+  // restunts.c init_game_state: every car spawns 210 units behind the line
+  // along -track_direction plus a 36-unit lateral flank chosen by `lateral`
+  // (0x100 player, 0x300 opponent). With the route heading +z the pedals sit
+  // 210 behind in z and drift 36 in the x direction -- the player right, the
+  // opponent left (sin(angle + 0x300) == -sin(angle + 0x100)).
+  const RaceSpawnDelta player = race_spawn_delta(0x000, 0x100);
+  EXPECT_EQ(player.dx, 36);
+  EXPECT_EQ(player.dz, -210);
+  const RaceSpawnDelta opp = race_spawn_delta(0x000, 0x300);
+  EXPECT_EQ(opp.dx, -36);
+  EXPECT_EQ(opp.dz, -210);
+
+  // Route heading +x (angle 0x100): the 210 stays behind along x and the
+  // flanks swing to +/-36 in z.
+  const RaceSpawnDelta player90 = race_spawn_delta(0x100, 0x100);
+  EXPECT_EQ(player90.dx, -210);
+  EXPECT_EQ(player90.dz, -36);
+  const RaceSpawnDelta opp90 = race_spawn_delta(0x100, 0x300);
+  EXPECT_EQ(opp90.dx, -210);
+  EXPECT_EQ(opp90.dz, 36);
+}

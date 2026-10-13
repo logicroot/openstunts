@@ -19,6 +19,12 @@ struct Config {
   // The player car id (the original's gameconfig.game_playercarid), e.g. "COUN"
   // (Countach) or "VETT" (Vetty). Selects CAR<ID>.RES / ST<ID>.P3S / STDA<ID>.PVS.
   std::string player_car = "COUN";
+  // The opponent car id (gameconfig.game_opponentcarid); empty = race without an
+  // opponent. Selects the same file set as the player car.
+  std::string opponent_car;
+  // The opponent driving style (gameconfig.game_opponenttype), 1..6: selects
+  // the OPPn.PRE sped table that sets its per-element target speeds.
+  int opponent_type = 1;
 
   // Returns the default config file path:
   //   Linux/macOS: $XDG_CONFIG_HOME/stunts3d/config.ini or ~/.config/stunts3d/config.ini

@@ -48,6 +48,21 @@ StartFinish find_start_finish(const Track& track);
 int finish_line_distance(int32_t car_x_long, int32_t car_z_long,
                          const StartFinish& sf);
 
+// One car's start-line spawn offset, in world units (restunts.c init_game_state
+// puts every car 210 + 36 units behind the line):
+//
+//   dx = sin(angle + 0x200) * 210 + sin(angle + lateral) * 36
+//   dz = cos(angle + 0x200) * 210 + cos(angle + lateral) * 36
+//
+// `lateral` is the corner added to `angle` for the flank term: 0x100 lines the
+// player up on one side of the course and 0x300 the opponent on the other
+// (sin(angle + 0x300) == -sin(angle + 0x100)).
+struct RaceSpawnDelta {
+  int dx = 0;
+  int dz = 0;
+};
+RaceSpawnDelta race_spawn_delta(int angle, int lateral);
+
 // restunts format_frame_as_string: minutes space-padded to two columns, seconds
 // zero-padded; with `hundredths`, appends "." plus (100 / frames_per_sec) times
 // the remaining frames.

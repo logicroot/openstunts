@@ -67,6 +67,8 @@ Config Config::load(const std::string& path) {
     else if (key == "asset_dir") c.asset_dir = val;
     else if (key == "last_track") c.last_track = val;
     else if (key == "player_car") c.player_car = val;
+    else if (key == "opponent_car") c.opponent_car = val;
+    else if (key == "opponent_type") c.opponent_type = std::atoi(val.c_str());
   }
   S3D_INFO("config: loaded %s", p.c_str());
   return c;
@@ -104,6 +106,8 @@ bool Config::save(const std::string& path) const {
   out << "asset_dir = " << asset_dir << "\n";
   out << "last_track = " << last_track << "\n";
   out << "player_car = " << player_car << "\n";
+  out << "opponent_car = " << opponent_car << "\n";
+  out << "opponent_type = " << opponent_type << "\n";
   return true;
 }
 

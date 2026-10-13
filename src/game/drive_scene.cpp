@@ -231,12 +231,18 @@ glm::mat4 fixed_model_matrix(const fixed::Mat3& rot, const glm::vec3& pos) {
 
 }  // namespace
 
-DriveScene::DriveScene(Track track, std::string asset_dir, std::string car_id)
+DriveScene::DriveScene(Track track, std::string asset_dir, std::string car_id,
+                       std::string opponent_car_id, int opponent_type)
     : track_(std::move(track)),
       asset_dir_(std::move(asset_dir)),
-      car_id_(std::move(car_id)) {
+      car_id_(std::move(car_id)),
+      opponent_car_id_(std::move(opponent_car_id)),
+      opponent_type_(std::clamp(opponent_type, 1, OpponentData::kOpponentCount)) {
   // The asset names are upper-case four-character ids (e.g. "COUN", "VETT").
   for (char& c : car_id_) {
+    c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+  }
+  for (char& c : opponent_car_id_) {
     c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
   }
   if (car_id_.empty()) car_id_ = kDefaultPlayerCarId;
@@ -302,10 +308,40 @@ bool DriveScene::on_enter() {
   }
   wheel_pose_ = world::CarWheelPose{};
   build_car_meshes();
-  build_debris_meshes(lib);
   if (car_mesh_.empty()) {
     S3D_WARN("player car shapes not found; driving invisible");
   }
+
+  // ---- Opponent car ----------------------------------------------------------
+  // (seg004.asm setup_player_cars / restunts.c init_game_state): the race only
+  // fields a second car when one is selected. The opponent gets its own SIMD
+  // profile (CAR<ID>.RES) and bodywork (ST<ID>.P3S), plus an OPPn.PRE course
+  // table that sets its per-element target speeds (game_opponenttype).
+  have_opponent_ = false;
+  if (!opponent_car_id_.empty()) {
+    const std::string opp_pre = opponent_file(opponent_type_);
+    if (!opponent_data_.load(path_join(asset_dir_, opp_pre))) {
+      S3D_WARN("%s not found; no opponent", opp_pre.c_str());
+    } else {
+      opponent_spec_ = load_or_default_spec(asset_dir_, opponent_car_id_);
+      opponent_lib_ = std::make_shared<ShapeLibrary>();
+      if (world::load_car_archive(asset_dir_, opponent_car_id_, opponent_lib_.get())) {
+        opponent_wheel_pose_ = world::CarWheelPose{};
+        build_opponent_meshes();
+        have_opponent_ = true;
+        S3D_INFO("opponent: %s (OPP%d.PRE \"%s\")", opponent_car_id_.c_str(),
+                 opponent_type_, opponent_data_.name().c_str());
+      } else {
+        opponent_lib_.reset();
+        S3D_WARN("opponent car shapes ST%s.P3S not found; no opponent",
+                 opponent_car_id_.c_str());
+      }
+    }
+  }
+
+  // Crash debris shards (state_op_unk): the scenery's GAME1/GAME2 "exp" pieces
+  // and each car's own, so this needs the car archives above.
+  build_debris_meshes(lib);
 
   // ---- Track collision -----------------------------------------------------
   // The element plane/wall tables live in GAME.PRE. With them bound to the
@@ -550,6 +586,33 @@ void DriveScene::build_car_meshes() {
   car_mesh_braking_ = mbb.to_mesh();
 }
 
+void DriveScene::build_opponent_meshes() {
+  if (opponent_lib_ == nullptr) return;
+  // Same bodywork pass as the player car (build_car_meshes), using the
+  // opponent's material/livery slot (gameconfig.game_opponentmaterial, 0 by
+  // default) and its own wheel pose.
+  const glm::vec4 backlight_off = have_palette_ ? world::material_color(0x2E, palette_)
+                                                : glm::vec4(0.67f, 0.0f, 0.0f, 1.0f);
+  const glm::vec4 backlight_on =
+      have_palette_ ? world::material_color(0x2F, palette_) : glm::vec4(1.0f, 0.33f, 0.33f, 1.0f);
+  const Palette* pal = have_palette_ ? &palette_ : nullptr;
+  const auto car_color = [pal](const glm::vec4& backlight) -> world::PaintColorFn {
+    return [pal, backlight](uint8_t paint) -> glm::vec4 {
+      if (pal != nullptr) return world::car_primitive_color(paint, *pal, backlight);
+      return paint == world::kCarBacklightPaint ? backlight : world::track_paint_color(paint);
+    };
+  };
+
+  MeshBuilder mb;
+  world::append_car_model(mb, *opponent_lib_, glm::mat4(1.0f), car_color(backlight_off), 0,
+                          &opponent_wheel_pose_);
+  opponent_mesh_ = mb.to_mesh();
+  MeshBuilder mbb;
+  world::append_car_model(mbb, *opponent_lib_, glm::mat4(1.0f), car_color(backlight_on), 0,
+                          &opponent_wheel_pose_);
+  opponent_mesh_braking_ = mbb.to_mesh();
+}
+
 void DriveScene::build_debris_meshes(const ShapeLibrary& track_lib) {
   // frame.c draws each debris piece as sceneshapes3[field_42B], which resolves
   // through game3dshapes to:
@@ -579,6 +642,7 @@ void DriveScene::build_debris_meshes(const ShapeLibrary& track_lib) {
   };
   build_from(track_lib, 0);
   if (car_lib_ != nullptr) build_from(*car_lib_, 1);
+  if (opponent_lib_ != nullptr) build_from(*opponent_lib_, 2);
 }
 
 void DriveScene::reset_car() {
@@ -609,16 +673,9 @@ void DriveScene::reset_car() {
   car_.car_rotate.z = 0;  // roll
   if (start_finish_.found) {
     const int angle = start_finish_.angle;
-    const auto sin_fast = [](int a) { return fixed::sin_fast(static_cast<unsigned short>(a)); };
-    const auto cos_fast = [](int a) { return fixed::cos_fast(static_cast<unsigned short>(a)); };
-    const int tmpcol =
-        fixed::multiply_and_scale(sin_fast(angle + 0x200), 210) +
-        fixed::multiply_and_scale(sin_fast(angle + 0x100), 36);
-    const int tmprow =
-        fixed::multiply_and_scale(cos_fast(angle + 0x200), 210) +
-        fixed::multiply_and_scale(cos_fast(angle + 0x100), 36);
-    spawn_x = static_cast<int>(world::cell_center_x(start_finish_.col)) + tmpcol;
-    spawn_z = static_cast<int>(world::cell_center_z(start_finish_.row)) + tmprow;
+    const game::RaceSpawnDelta d = game::race_spawn_delta(angle, 0x100);
+    spawn_x = static_cast<int>(world::cell_center_x(start_finish_.col)) + d.dx;
+    spawn_z = static_cast<int>(world::cell_center_z(start_finish_.row)) + d.dz;
     car_.car_rotate.x = physics::wrap_negate(static_cast<int16_t>(angle));
   }
 
@@ -646,11 +703,100 @@ void DriveScene::reset_car() {
   wheel_pose_ = world::CarWheelPose{};
   build_car_meshes();
 
+  // The opponent lines up on the other flank of the same grid (restunts.c
+  // init_game_state) and gets its first course checkpoint.
+  reset_opponent_car();
+
   // Snap the camera behind the car so the first frame is already framed.
   const glm::vec3 car_pos = car_world_position(0.0f);
   camera_.position = car_pos + glm::vec3(0.0f, kFollowHeight, -kFollowDistance);
   aim_at(camera_, car_pos + glm::vec3(0.0f, kFollowAimHeight, 0.0f));
   camera_prev_ = camera_;
+}
+
+void DriveScene::reset_opponent_car() {
+  if (!have_opponent_) return;
+  if (!race_.route.valid()) {
+    // A broken route graph cannot sustain the AI's checkpoint machine; disable
+    // the opponent for this run rather than feed it an empty course path.
+    S3D_WARN("opponent needs a route graph (track setup error); opponent disabled");
+    have_opponent_ = false;
+    return;
+  }
+
+  // The original zeroes state.field_45E at race setup (init_game_state).
+  opponent_field_45e_ = 0;
+
+  // The same init_carstate_from_simd defaults as the player (restunts.c:371):
+  // automatic transmission, first gear, idle rpm, the gear lever at first.
+  opponent_ = physics::CarState{};
+  opponent_.car_transmission = physics::kTransmissionAutomatic;
+  opponent_.car_current_gear = 1;
+  opponent_.car_changing_gear = physics::kGearChangeInactive;
+  opponent_.car_gearratio = opponent_spec_.gear_ratios[1];
+  opponent_.car_gearratioshr8 = static_cast<uint16_t>(opponent_.car_gearratio >> 8);
+  opponent_.car_knob_x = opponent_spec_.knob_points[1].x;
+  opponent_.car_knob_x2 = opponent_.car_knob_x;
+  opponent_.car_knob_y = opponent_spec_.knob_points[1].y;
+  opponent_.car_knob_y2 = opponent_.car_knob_y;
+  opponent_.car_currpm = opponent_spec_.idle_rpm;
+  opponent_.car_route_flag = 1;  // field_CF, the AI's steering-nav latch
+  opponent_.car_sumSurfRearWheels = 1;
+  opponent_.car_sumSurfAllWheels = 1;
+
+  // Spawn: 210 + 36 units behind the line, on the flank the player is not on
+  // (0x300 vs the player's 0x100; restunts.c init_game_state), facing
+  // -track_angle. The pivot rests kCarBodyDrop above the ground.
+  int spawn_x = static_cast<int>(world::cell_center_x(7));
+  int spawn_z = static_cast<int>(world::cell_center_z(5));
+  opponent_.car_rotate.x = 0;
+  opponent_.car_rotate.y = 0;
+  opponent_.car_rotate.z = 0;
+  if (start_finish_.found) {
+    const int angle = start_finish_.angle;
+    const game::RaceSpawnDelta d = game::race_spawn_delta(angle, 0x300);
+    spawn_x = static_cast<int>(world::cell_center_x(start_finish_.col)) + d.dx;
+    spawn_z = static_cast<int>(world::cell_center_z(start_finish_.row)) + d.dz;
+    opponent_.car_rotate.x = physics::wrap_negate(static_cast<int16_t>(angle));
+  }
+
+  const physics::GroundSample g =
+      ground_sample(track_, static_cast<float>(spawn_x), static_cast<float>(spawn_z));
+  opponent_.car_position.x = spawn_x * 64;
+  opponent_.car_position.z = spawn_z * 64;
+  opponent_.car_position.y = (g.height + kCarBodyDrop) * 64;
+  opponent_.car_previous_position = opponent_.car_position;
+  opponent_prev_ = opponent_;
+
+  // The AI's per-race inputs: cache the course path and seed the first
+  // checkpoint (sub_18D60), exactly like init_game_state's opponent block.
+  build_opponent_path();
+  physics::init_opponent_checkpoint(opponent_setup(), &opponent_ai_, &opponent_);
+
+  // Wheels back at the rest pose.
+  opponent_wheel_pose_ = world::CarWheelPose{};
+  build_opponent_meshes();
+}
+
+void DriveScene::build_opponent_path() {
+  // trackdata3 (seg004.asm load_opponent_data): the course the AI walks. The
+  // path only depends on the route graph and the OPPn.PRE sped table, so it is
+  // cached here and only refreshed when the race is (re)set up.
+  opponent_path_ = race_.route.opponent_path(opponent_data_.speed_table().data(),
+                                             static_cast<int>(opponent_data_.speed_table().size()));
+}
+
+physics::OpponentRaceSetup DriveScene::opponent_setup() const {
+  physics::OpponentRaceSetup setup;
+  setup.route = &race_.route;
+  setup.track = &track_;
+  setup.data = &opponent_data_;
+  setup.path = opponent_path_;
+  setup.start_col = race_.start_col2;  // game_startcol2
+  setup.start_row = race_.start_row2;  // game_startrow2 (bottom-up rows)
+  setup.track_angle = start_finish_.angle;
+  setup.game_inputmode = 0;  // 0 = a live race, 2 = the garage autopilot
+  return setup;
 }
 
 void DriveScene::physics_tick(const Controls& controls) {
@@ -715,6 +861,47 @@ void DriveScene::physics_tick(const Controls& controls) {
   if (next_wheel_pose != wheel_pose_) {
     wheel_pose_ = next_wheel_pose;
     build_car_meshes();
+  }
+
+  // Opponent AI (seg001.asm opponent_op): the original runs the second car's
+  // brain and its physics tail right after the player's. It reads `car_`'s
+  // crash state for the interception checks, hence below the player's motion.
+  // The returned field_45E (state.field_45E) drives the HUD opponent-near
+  // indicator; the original zeroes it at the top of every opponent_op.
+  if (have_opponent_) {
+    const int8_t opp_crash_before = opponent_.car_crashBmpFlag;
+    opponent_field_45e_ = physics::run_opponent_ai(
+        opponent_setup(), &opponent_ai_, &opponent_, car_, opponent_spec_,
+        physics::kGameFrameRateNormal, sampler, &collision_);
+
+    // Opponent crash debris (state_op_unk, reached from opponent_op's
+    // update_crash_state): the same burst the player throws, only the shards
+    // come from the opponent's shape archive (field_42B 8..11 -> archive 2)
+    // and are owned by the opponent (field_443 = 1).
+    if (opponent_.car_crashBmpFlag == physics::kCrashEventCollision &&
+        opp_crash_before == physics::kCrashEventNone) {
+      physics::spawn_debris(&debris_, physics::kDebrisOwnerOpponent,
+                            opponent_.car_rotate.x, 0, &kevin_rng_);
+    }
+
+    // Mirror the player's wheel pass (sub_204AE) for the opponent body; only
+    // the shape archive differs.
+    world::CarWheelPose next_opp_pose = opponent_wheel_pose_;
+    if (!next_opp_pose.posed) {
+      if (opponent_.car_steeringAngle != 0) {
+        next_opp_pose.posed = true;
+        next_opp_pose.steering_angle = opponent_.car_steeringAngle;
+      }
+    } else if (opponent_.car_steeringAngle != next_opp_pose.steering_angle) {
+      next_opp_pose.steering_angle = opponent_.car_steeringAngle;
+    }
+    for (int i = 0; i < 4; ++i) {
+      next_opp_pose.suspension[i] = opponent_.car_suspension_deflection[i];
+    }
+    if (next_opp_pose != opponent_wheel_pose_) {
+      opponent_wheel_pose_ = next_opp_pose;
+      build_opponent_meshes();
+    }
   }
 
   // game_pEndFrame (statecrs.c loc_19760): the tick the crash started. It is set
@@ -834,6 +1021,7 @@ void DriveScene::update(double dt, const Controls& controls) {
     // interpolation and make the car/camera advance in 20 Hz jumps.
     display_prev_ = car_;
     camera_prev_ = camera_;
+    opponent_prev_ = opponent_;
     physics_tick(controls);
     update_camera();
   }
@@ -883,6 +1071,36 @@ glm::mat4 DriveScene::car_model_matrix(float alpha) const {
   return model;
 }
 
+glm::vec3 DriveScene::opponent_world_position(float alpha) const {
+  if (!have_opponent_) return car_world_position(alpha);
+  const float scale = 1.0f / 64.0f;
+  const auto lerp = [alpha, scale](int32_t prev, int32_t curr) {
+    return (static_cast<float>(prev) + (static_cast<float>(curr) - static_cast<float>(prev)) * alpha) *
+           scale;
+  };
+  return glm::vec3(lerp(opponent_prev_.car_position.x, opponent_.car_position.x),
+                   lerp(opponent_prev_.car_position.y, opponent_.car_position.y),
+                   lerp(opponent_prev_.car_position.z, opponent_.car_position.z));
+}
+
+glm::mat4 DriveScene::opponent_model_matrix(float alpha) const {
+  // Same pose transform as the player car: interpolate the 0x400-unit angles,
+  // rebuild mat_rot_zxy(-roll, -pitch, -yaw) and drop the body to its pivot.
+  const int16_t yaw256 = static_cast<int16_t>(
+      lerp_angle(opponent_prev_.car_rotate.x, opponent_.car_rotate.x, alpha));
+  const int16_t pitch256 = static_cast<int16_t>(
+      lerp_angle(opponent_prev_.car_rotate.y, opponent_.car_rotate.y, alpha));
+  const int16_t roll256 = static_cast<int16_t>(
+      lerp_angle(opponent_prev_.car_rotate.z, opponent_.car_rotate.z, alpha));
+  const fixed::Mat3 world_rot =
+      fixed::mat_rot_zxy(physics::wrap_negate(roll256), physics::wrap_negate(pitch256),
+                         physics::wrap_negate(yaw256), 0);
+
+  glm::mat4 model = fixed_model_matrix(world_rot, opponent_world_position(alpha));
+  model = model * glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -kCarBodyDrop, 0.0f));
+  return model;
+}
+
 glm::mat4 DriveScene::debris_model_matrix(const physics::DebrisPiece& prev,
                                           const physics::DebrisPiece& curr,
                                           float alpha) const {
@@ -903,7 +1121,7 @@ glm::mat4 DriveScene::debris_model_matrix(const physics::DebrisPiece& prev,
   const float scale = 1.0f / 64.0f;
   const glm::vec3 rel(lerp_i32(prev.x, curr.x), lerp_i32(prev.y, curr.y),
                       lerp_i32(prev.z, curr.z));
-  const glm::vec3 pos = car_world_position(alpha) + rel * scale;
+  const glm::vec3 pos = debris_owner_position(curr.owner, alpha) + rel * scale;
 
   const int16_t sz = static_cast<int16_t>(lerp_angle(prev.spin_z, curr.spin_z, a));
   const int16_t sx = static_cast<int16_t>(lerp_angle(prev.spin_x, curr.spin_x, a));
@@ -912,6 +1130,17 @@ glm::mat4 DriveScene::debris_model_matrix(const physics::DebrisPiece& prev,
                                              physics::wrap_negate(sx),
                                              physics::wrap_negate(ang), 0);
   return fixed_model_matrix(rot, pos);
+}
+
+glm::vec3 DriveScene::debris_owner_position(uint8_t owner, float alpha) const {
+  // frame.c hangs each piece off the *owner* car: game_longs + playerstate
+  // car_posWorld for the player's shards (field_443 = 0) and + opponentstate
+  // car_posWorld for the opponent's (= 1). Track-object pieces (= 2) are not
+  // spawned in this port yet, so they keep the player's car.
+  if (owner == physics::kDebrisOwnerOpponent && have_opponent_) {
+    return opponent_world_position(alpha);
+  }
+  return car_world_position(alpha);
 }
 
 bool DriveScene::car_screen_rect(const Camera& camera, float alpha, int width,
@@ -1036,7 +1265,7 @@ void DriveScene::build_hud(std::vector<Vertex>& verts, int width, int height,
   // Direction arrow / wrong-way warning (seg003.asm draw_ingame_text loc_1D2DC):
   // field_45D 1 = "left" arrow, 2 = "righ" arrow, 3 = "Wrong Way", 0 = none. The
   // original gates this on cameramode 0, no opponent follow and no crash; only
-  // the crash flag exists in this port. field_45E (opponent near) is deferred.
+  // the crash flag exists in this port.
   if (car_.car_crashBmpFlag == 0) {
     const Sprite2D* arrow = nullptr;
     if (race_.field_45d == 1) arrow = &arrow_left_;
@@ -1052,6 +1281,35 @@ void DriveScene::build_hud(std::vector<Vertex>& verts, int width, int height,
       const float x = cx - w * 0.5f;
       append_text(verts, text_font_, msg, x + scale, y + scale, scale, hud_shadow_);
       append_text(verts, text_font_, msg, x, y, scale, hud_fg_);
+    }
+
+    // Opponent-near indicator (seg003.asm draw_ingame_text loc_1D398 /
+    // loc_1D47E): while the player has caught the opponent, field_45E (the
+    // run_opponent_ai return) lights a side arrow under the wrong-way arrow --
+    // pointing where the opponent is -- with the "Opponent Near" text centred
+    // under it (the original centers the text at x = 0x74 in both cases; the
+    // arrow sits at (0x44, 0x71) for the first-edge side and (0xE4, 0x71) for
+    // the second).
+    if (opponent_field_45e_ != 0) {
+      const Sprite2D* side =
+          (opponent_field_45e_ == 1) ? &arrow_left_ : &arrow_right_;
+      if (side != nullptr && side->valid()) {
+        const float offx = (static_cast<float>(width) - 320.0f * scale) * 0.5f;
+        const float ax =
+            offx + (opponent_field_45e_ == 1 ? 0x44 : 0xE4) * scale;
+        const float ay = 0x71 * scale;
+        append_sprite(verts, *side, palette_,
+                      ax - static_cast<float>(side->width) * scale * 0.5f,
+                      ay - static_cast<float>(side->height) * scale * 0.5f, scale);
+        if (text_font_.valid()) {
+          const std::string msg = "Opponent Near";
+          const float tw = static_cast<float>(text_font_.text_width(msg)) * scale;
+          const float x = offx + 0x74 * scale - tw * 0.5f;
+          const float y = ay + static_cast<float>(side->height) * scale * 0.5f + scale;
+          append_text(verts, text_font_, msg, x + scale, y + scale, scale, hud_shadow_);
+          append_text(verts, text_font_, msg, x, y, scale, hud_fg_);
+        }
+      }
     }
   }
 
@@ -1352,10 +1610,20 @@ void DriveScene::render(Renderer& renderer, int width, int height) {
     renderer.draw_world(body, render_cam, car_model_matrix(alpha));
   }
 
+  // The opponent car is drawn in every camera mode (frame.c adds it whenever
+  // game_opponenttype != 0; only the player's own bodywork hides in the
+  // cockpit), with the same brake-light material switch.
+  if (have_opponent_ && !opponent_mesh_.empty()) {
+    const Mesh& body = (opponent_.car_is_braking != 0 && !opponent_mesh_braking_.empty())
+                           ? opponent_mesh_braking_
+                           : opponent_mesh_;
+    renderer.draw_world(body, render_cam, opponent_model_matrix(alpha));
+  }
+
   // Crash debris (frame.c ~903): every live piece (field_38E != 0) is drawn as
-  // its sceneshapes3 shard at (game_longs + car_posWorld) >> 6 with its tumble
-  // rotation. field_42B selects both the shard and the owning archive (see
-  // build_debris_meshes).
+  // its sceneshapes3 shard at (game_longs + owner_car_posWorld) >> 6 with its
+  // tumble rotation. field_42B selects both the shard and the owning archive
+  // (see build_debris_meshes); field_443 picks the owner car's position.
   if (debris_.any_active()) {
     for (int i = 0; i < physics::kDebrisSlots; ++i) {
       const physics::DebrisPiece& curr = debris_.pieces[i];

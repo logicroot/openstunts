@@ -14,6 +14,10 @@ namespace {
 // Upper bound on the route graph size (seg004.asm's 0x385 arrays).
 constexpr int kMaxRouteNodes = 0x385;
 
+// 1.14 fixed-point sin/cos of a 0x400-unit angle (the original sin_fast).
+int16_t sin_fast(int a) { return fixed::sin_fast(static_cast<unsigned short>(a)); }
+int16_t cos_fast(int a) { return fixed::cos_fast(static_cast<unsigned short>(a)); }
+
 // seg004.asm maps filler bytes before comparing against the start/finish set:
 // element >= 0xFD becomes blank, 0xB6..0xFC becomes 4 (a plain road tile).
 uint8_t normalize_element(uint8_t e) {
@@ -31,6 +35,17 @@ std::string pad_number(int value, int width, char fill) {
 }
 
 }  // namespace
+
+RaceSpawnDelta race_spawn_delta(int angle, int lateral) {
+  // init_game_state (restunts.c): 210 units behind the line along the track
+  // direction plus a 36-unit lateral flank at `lateral`.
+  RaceSpawnDelta out;
+  out.dx = fixed::multiply_and_scale(sin_fast(angle + 0x200), 210) +
+           fixed::multiply_and_scale(sin_fast(angle + lateral), 36);
+  out.dz = fixed::multiply_and_scale(cos_fast(angle + 0x200), 210) +
+           fixed::multiply_and_scale(cos_fast(angle + lateral), 36);
+  return out;
+}
 
 int start_finish_angle(uint8_t element) {
   // seg004.asm loc_2082C..loc_20952 (element byte -> track direction).
