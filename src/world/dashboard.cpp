@@ -149,43 +149,33 @@ void dashboard_point_at(const uint8_t* points, int index, int* out_x, int* out_y
 bool dashboard_rects(const Dashboard& d, int width, int height,
                      DashboardRects* out) {
   if (!d.valid() || out == nullptr || width <= 0 || height <= 0) return false;
-
-  // The cockpit artwork is authored for a 320x200 view, so it must be scaled by
-  // the same factor in both axes (square pixels) and kept centred: every panel
-  // sprite is blitted 1:1 in the original frame, and stretching x out to the
-  // window width instead (as the widescreen world does) made the gear plate and
-  // the lever knob ~11% too wide on every row. `scale` is capped so a narrow
-  // window cannot clip the frame horizontally.
-  const float scale = std::min(static_cast<float>(height) / kAuthorHeight,
-                               static_cast<float>(width) / kAuthorWidth);
-  const float sx = scale;
-  const float sy = scale;
-  const float offx = (static_cast<float>(width) - kAuthorWidth * sx) * 0.5f;
+  const float sx = static_cast<float>(width) / kAuthorWidth;
+  const float sy = static_cast<float>(height) / kAuthorHeight;
 
   DashboardRects r;
-  r.roof_x = static_cast<float>(d.roof.pos_x) * sx + offx;
+  r.roof_x = static_cast<float>(d.roof.pos_x) * sx;
   r.roof_y = static_cast<float>(d.roof.pos_y) * sy;
   r.roof_w = static_cast<float>(d.roof.width) * sx;
   r.roof_h = static_cast<float>(d.roof.height) * sy;
-  r.dash_x = static_cast<float>(d.dash.pos_x) * sx + offx;
+  r.dash_x = static_cast<float>(d.dash.pos_x) * sx;
   r.dash_y = static_cast<float>(d.dash.pos_y) * sy;
   r.dash_w = static_cast<float>(d.dash.width) * sx;
   r.dash_h = static_cast<float>(d.dash.height) * sy;
   const Sprite2D* wheel = d.any_wheel();
   r.has_wheel = wheel != nullptr;
-  r.wheel_x = wheel ? static_cast<float>(wheel->pos_x) * sx + offx : 0.0f;
+  r.wheel_x = wheel ? static_cast<float>(wheel->pos_x) * sx : 0.0f;
   r.wheel_y = wheel ? static_cast<float>(wheel->pos_y) * sy : 0.0f;
   r.wheel_w = wheel ? static_cast<float>(wheel->width) * sx : 0.0f;
   r.wheel_h = wheel ? static_cast<float>(wheel->height) * sy : 0.0f;
 
   r.has_instruments = d.ins2.valid();
-  r.instrument_x = static_cast<float>(d.ins2.pos_x) * sx + offx;
+  r.instrument_x = static_cast<float>(d.ins2.pos_x) * sx;
   r.instrument_y = static_cast<float>(d.ins2.pos_y) * sy;
   r.instrument_w = static_cast<float>(d.ins2.width) * sx;
   r.instrument_h = static_cast<float>(d.ins2.height) * sy;
 
   r.has_gear_box = d.gear_box.valid();
-  r.gear_box_x = static_cast<float>(d.gear_box.pos_x) * sx + offx;
+  r.gear_box_x = static_cast<float>(d.gear_box.pos_x) * sx;
   r.gear_box_y = static_cast<float>(d.gear_box.pos_y) * sy;
   r.gear_box_w = static_cast<float>(d.gear_box.width) * sx;
   r.gear_box_h = static_cast<float>(d.gear_box.height) * sy;
