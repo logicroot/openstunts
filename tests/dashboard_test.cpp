@@ -342,11 +342,22 @@ TEST(dashboard_rects_instruments_and_gear) {
   d.gear_knob.pivot_x = 12;
   d.gear_knob.pivot_y = 11;
   d.gear_knob.pixels.assign(24 * 23, 0);
+  // The knob's AND stencil ("gnab") shares the colour's rect.
+  d.gear_knob_mask.width = 24;
+  d.gear_knob_mask.height = 23;
+  d.gear_knob_mask.pivot_x = 12;
+  d.gear_knob_mask.pivot_y = 11;
+  d.gear_knob_mask.pixels.assign(24 * 23, 0xFF);
   d.steer_dot.width = 8;
   d.steer_dot.height = 4;
   d.steer_dot.pivot_x = 5;
   d.steer_dot.pivot_y = 2;
   d.steer_dot.pixels.assign(8 * 4, 0);
+  d.steer_dot_mask.width = 8;
+  d.steer_dot_mask.height = 4;
+  d.steer_dot_mask.pivot_x = 5;
+  d.steer_dot_mask.pivot_y = 2;
+  d.steer_dot_mask.pixels.assign(8 * 4, 0xFF);
 
   world::DashboardRects r;
   EXPECT_TRUE(world::dashboard_rects(d, 320, 200, &r));
@@ -394,6 +405,15 @@ TEST(dashboard_rects_instruments_and_gear) {
   EXPECT_TRUE(!r.has_dot);
   EXPECT_EQ(r.instrument_x, 0.0f);
   EXPECT_EQ(r.gear_box_x, 0.0f);
+
+  // The knob and dot are AND-stencil + OR-colour pairs, so a colour without its
+  // stencil is not drawable either.
+  world::Dashboard colour_only = synthetic_dashboard();
+  colour_only.gear_knob = d.gear_knob;
+  colour_only.steer_dot = d.steer_dot;
+  EXPECT_TRUE(world::dashboard_rects(colour_only, 320, 200, &r));
+  EXPECT_TRUE(!r.has_knob);
+  EXPECT_TRUE(!r.has_dot);
 }
 
 TEST(dashboard_rects_patches_and_dast) {
@@ -515,6 +535,23 @@ TEST(dashboard_load_player_car_instruments) {
   EXPECT_EQ(d.steer_dot.height, 4);
   EXPECT_EQ(d.steer_dot.pivot_x, 5);
   EXPECT_EQ(d.steer_dot.pivot_y, 2);
+  // Each moving part is an AND-stencil + OR-colour pair ("gnob"/"gnab" and
+  // "dot "/"dota") sharing one rect, and the stencil holds only a bit mask.
+  EXPECT_TRUE(d.gear_knob_mask.valid());
+  EXPECT_EQ(d.gear_knob_mask.width, d.gear_knob.width);
+  EXPECT_EQ(d.gear_knob_mask.height, d.gear_knob.height);
+  EXPECT_EQ(d.gear_knob_mask.pivot_x, d.gear_knob.pivot_x);
+  EXPECT_EQ(d.gear_knob_mask.pivot_y, d.gear_knob.pivot_y);
+  EXPECT_TRUE(d.steer_dot_mask.valid());
+  EXPECT_EQ(d.steer_dot_mask.width, d.steer_dot.width);
+  EXPECT_EQ(d.steer_dot_mask.height, d.steer_dot.height);
+  EXPECT_EQ(d.steer_dot_mask.pivot_x, d.steer_dot.pivot_x);
+  EXPECT_EQ(d.steer_dot_mask.pivot_y, d.steer_dot.pivot_y);
+  bool knob_mask_is_bitmask = true;
+  for (uint8_t v : d.gear_knob_mask.pixels) {
+    if (v != 0x00 && v != 0xFF) knob_mask_is_bitmask = false;
+  }
+  EXPECT_TRUE(knob_mask_is_bitmask);
   // The turned-wheel patches ("ins1"/"ins3" + "inm1"/"inm3" stencils) are
   // panel-local; the COUN's patch sits at (64,21)/(0,21) with its stencil one
   // row above.

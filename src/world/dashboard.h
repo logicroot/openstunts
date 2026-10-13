@@ -23,8 +23,10 @@
 //
 // The companion archive STDB<carid>.PVS holds the moving parts:
 //
-//   "gnob"  24x23  the gear lever knob (pivot at its centre)
-//   "dot"   8x4    the steering-position indicator (pivot (5,2))
+//   "gnob"  24x23  the gear lever knob colour (pivot at its centre); "gnab" is
+//                  its AND stencil
+//   "dot"   8x4    the steering-position indicator colour (its SHAPE2D pivot);
+//                  "dota" is its AND stencil
 //   "dig0".."dig9" 8x7 digital speedometer glyphs, loaded only for the cars
 //                  whose SIMD classifies the speedometer as digital
 //
@@ -36,11 +38,14 @@
 // (seg005.asm loc_23299 / loc_232BC); cars with a digital readout
 // (`spdcenter.y == 0`) stamp glyphs at `spdpoints[0..5]` instead (loc_233A2).
 //
-// The "ins"/"inm" and "dast"/"dasm" pairs are OR-blits paired with an AND
-// stencil: the mask clears its opaque pixels to black (the file stores them as
-// palette index 0) and the shape then writes its own pixels, with palette index
-// 0 acting as a no-op. Reproducing the visible result therefore means drawing
-// the stencil opaquely and the shape with index 0 treated as transparent.
+// The "ins"/"inm", "dast"/"dasm", "gnob"/"gnab" and "dot"/"dota" pairs are
+// OR-blits paired with an AND stencil: the mask clears its opaque pixels to
+// black (the file stores them as palette index 0) and the shape then writes its
+// own pixels, with palette index 0 acting as a no-op. Reproducing the visible
+// result therefore means drawing the stencil opaquely and the shape with index 0
+// treated as transparent. A mask is 0x00 over the shape's footprint and 0xFF
+// everywhere else (seg012.asm sprite_putimage_and* clears, sprite_putimage_or*
+// ORs), so the pair's visible result is (dst & mask) | shape.
 //
 // Reference: seg005.asm setup_car_shapes, loop_game and c/restunts.c run_game.
 
@@ -65,8 +70,10 @@ struct Dashboard {
   Sprite2D dast;         // "dast" per-frame strip (absolute screen coords)
   Sprite2D dast_mask;    // "dasm" AND stencil for dast
   Sprite2D gear_box;  // "gbox" gear-selector plate; top-left anchors the knob
-  Sprite2D gear_knob; // "gnob" gear lever knob (STDB<carid>.PVS)
-  Sprite2D steer_dot; // "dot" steering-position indicator (STDB<carid>.PVS)
+  Sprite2D gear_knob; // "gnob" gear lever knob colour (STDB<carid>.PVS)
+  Sprite2D gear_knob_mask;  // "gnab" AND stencil paired with gear_knob
+  Sprite2D steer_dot;       // "dot" steering-position indicator colour (STDB)
+  Sprite2D steer_dot_mask;  // "dota" AND stencil paired with steer_dot
   bool wheels_loaded = false;
   bool instruments_loaded = false;
   bool patches_loaded[2] = {false, false};
@@ -93,8 +100,9 @@ struct Dashboard {
 
 // Loads "dash", "roof" and the optional "whl1"/"whl2"/"whl3" steering wheel from
 // <asset_dir>/STDA<car_id>.PVS (car_id is the four character id, e.g. "COUN"),
-// plus the optional "ins2"/"gbox" faces from the same archive and the "gnob" /
-// "dot" moving parts from STDB<car_id>.PVS. `loaded` is set only when dash and
+// plus the optional "ins2"/"gbox" faces from the same archive and the
+// "gnob"/"gnab" and "dot"/"dota" moving parts (colour + AND stencil) from
+// STDB<car_id>.PVS. `loaded` is set only when dash and
 // roof are present; everything else is best-effort (`wheels_loaded`,
 // `instruments_loaded`). Returns out->loaded.
 bool load_dashboard(const std::string& asset_dir, const std::string& car_id,
@@ -211,16 +219,16 @@ struct DashboardRects {
   float gear_box_y;
   float gear_box_w;
   float gear_box_h;
-  // The gear-lever knob ("gnob"): `knob_pivot_*` is the authored pivot that is
-  // placed at (gear_box + car_knob_x/y); the knob is anchored by its pivot
-  // (seg012.asm sprite_putimage_or_alt), not its top-left.
+  // The gear-lever knob ("gnob" + its "gnab" stencil): `knob_pivot_*` is the
+  // authored pivot that is placed at (gear_box + car_knob_x/y); the knob is
+  // anchored by its pivot (seg012.asm sprite_putimage_or_alt), not its top-left.
   bool has_knob;
   float knob_w;
   float knob_h;
   float knob_pivot_x;
   float knob_pivot_y;
-  // The steering-position indicator ("dot"): `dot_pivot_*` is placed at the
-  // authored screen coordinate from SIMD steeringdots.
+  // The steering-position indicator ("dot" + its "dota" stencil): `dot_pivot_*`
+  // is placed at the authored screen coordinate from SIMD steeringdots.
   bool has_dot;
   float dot_w;
   float dot_h;

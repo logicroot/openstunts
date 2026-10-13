@@ -233,9 +233,11 @@ in the original's default view (`dashb_toggle = 1`, `seg005.asm`
 | `inm1`/`inm3` | 72×19 | (64,20)/(0,20) | the patches' AND stencils, one row above the patch |
 | `dast`/`dasm` | 320×8 | (0,130) | per-frame band filling the gap above the panel (JAGU/P962/PMIN only) |
 
-The gear-box face `gbox` (64×56 at (256,144)) and the gear lever
-(`gnob`, `gnab` and the `dot`/`dota`/`dot1`/`dot2` steering dots) live in the
-companion archive `STDB<car>.PVS`.
+The gear-box face `gbox` (64×56 at (256,144)), the gear lever and the steering
+dots live in the companion archive `STDB<car>.PVS`: `gnob`/`gnab` (the knob's
+colour and its AND stencil), `dot `/`dota` (the indicator's colour and its AND
+stencil) and `dot1`/`dot2`, which the engine uses only to erase the previous
+frame's dot (the port redraws the panel every frame, so it ignores them).
 
 The original renders the 3D world inside `rect_windshield =
 [roofbmpheight, dashbmp_y]` and composites the panel over the rest. The port
@@ -244,7 +246,11 @@ glyphs → needles → turned-wheel patch → `gbox` → gear knob → steering 
 `roof`. The panel art is blitted opaquely, so later pieces hide earlier ones
 where they overlap; the `dast`/digital/patch overlays are alpha-blended instead
 (their transparent and palette-index-0 texels leave the destination alone,
-matching the engine's OR/AND blits). In particular:
+matching the engine's OR/AND blits). The gear knob and steering dot are
+alpha-blended for the same reason: their `gnab`/`dota` stencil is blitted
+opaquely (0x00 → black, 0xFF → keep the destination) and then `gnob`/`dot ` with
+palette index 0 as a no-op, which reproduces `(dst & mask) | colour`. In
+particular:
 
 * The steering wheel is picked from `whl1`/`whl2`/`whl3` by the steering angle
   (`seg005.asm loc_2319D`: `trunc(angle/8)` against a ±10 dead zone), then
@@ -289,15 +295,20 @@ The Countach (`CARCOUN.RES`) is analog on both dials
 (`spdcenter = (25,19)`, 84 points; `revcenter = (107,19)`, 71 points); the
 Vetty (`CARVETT.RES`) has `spdcenter.y == 0`, i.e. the digital speedometer.
 
-The gear knob is drawn pivot-anchored (`sprite_putimage_or_alt`) at
-`gbox_pos + knob_points[gear]`: `gnob`'s pivot (12,11) is its centre, so the
-lever sits centred on the selected gate. `car_knob_x/y` are seeded to
-`knob_points[1]` at race start (`restunts.c init_game_state`).
+The gear knob is drawn pivot-anchored by its AND stencil + OR colour pair
+(`loc_23120`: `sprite_putimage_and_alt2` with `gnab`, then
+`sprite_putimage_or_alt` with `gnob`) at `gbox_pos + knob_points[gear]`:
+`gnob`'s pivot (12,11) is its centre, so the lever sits centred on the selected
+gate. `car_knob_x/y` are seeded to `knob_points[1]` at race start
+(`restunts.c init_game_state`). `gnab` is 0x00 over the knob's footprint and
+0xFF over the surround, so drawing it opaquely first is what keeps the gear-box
+art visible around the lever (the knob's own palette-index-0 pixels stay black).
 
-The steering dot (`stdb`/`dot`) is staged the same way: the steering angle maps
-to an index `min(|sign(a) * (|a| >> 3)|, 30)` into `steeringdots`, and the dot
-is drawn at `steeringdots[i]` with its x mirrored about `steeringdots[0].x`
-(`2*steeringdots[0].x - x`) when steering left. Note the resource id is the
+The steering dot (`dot ` and its `dota` stencil) is staged the same way: the
+steering angle maps to an index `min(|sign(a) * (|a| >> 3)|, 30)` into
+`steeringdots`, and the dot is drawn at `steeringdots[i]` with its x mirrored
+about `steeringdots[0].x` (`2*steeringdots[0].x - x`) when steering left, using
+the same AND-stencil + OR-colour blit as the knob. Note the resource id is the
 four-character `"dot "` (trailing space).
 
 #### Digital readout, `dast` strip and turned-wheel patches

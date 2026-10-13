@@ -81,14 +81,25 @@ bool load_dashboard(const std::string& asset_dir, const std::string& car_id,
   out->dast_loaded = have_dast && have_dasm;
 
   // The moving parts (gear lever knob and steering dot) live in STDB<carid>.PVS
-  // (loc_22E10: locate_many_resources "gnobgnabdotdotadot1dot2").
+  // (loc_22E10: locate_many_resources "gnobgnabdotdotadot1dot2"). Each is drawn
+  // as an AND stencil plus an OR colour pair (loc_23120 for the knob, loc_23561
+  // for the dot), so both halves are required.
   const std::string pvs_b = path_join(asset_dir, "STDB" + id + ".PVS");
-  const bool have_knob = load_sprite2d(pvs_b, "gnob", &out->gear_knob);
-  // The steering-dot resource id is four characters, "dot " with a trailing
-  // space (seg005.asm loc_22E10 names "gnobgnabdot dotadot1dot2").
-  const bool have_dot = load_sprite2d(pvs_b, "dot ", &out->steer_dot);
-  if (!have_knob) S3D_WARN("dashboard: %s is missing the gnob gear lever", pvs_b.c_str());
-  if (!have_dot) S3D_WARN("dashboard: %s is missing the dot indicator", pvs_b.c_str());
+  const bool have_knob =
+      load_sprite2d(pvs_b, "gnob", &out->gear_knob) &&
+      load_sprite2d(pvs_b, "gnab", &out->gear_knob_mask);
+  // The steering-dot resource ids are four characters: "dot " (with a trailing
+  // space) is the colour and "dota" its stencil (seg005.asm loc_22E10 names
+  // "gnobgnabdot dotadot1dot2").
+  const bool have_dot =
+      load_sprite2d(pvs_b, "dot ", &out->steer_dot) &&
+      load_sprite2d(pvs_b, "dota", &out->steer_dot_mask);
+  if (!have_knob) {
+    S3D_WARN("dashboard: %s is missing the gnob/gnab gear lever", pvs_b.c_str());
+  }
+  if (!have_dot) {
+    S3D_WARN("dashboard: %s is missing the dot/dota indicator", pvs_b.c_str());
+  }
 
   // The digital speedometer glyphs also come from STDB (loc_2105:
   // locate_many_resources "dig0dig1...dig9"). Only the cars whose SIMD marks the
@@ -274,13 +285,15 @@ bool dashboard_rects(const Dashboard& d, int width, int height,
   r.gear_box_w = static_cast<float>(d.gear_box.width) * sx;
   r.gear_box_h = static_cast<float>(d.gear_box.height) * sy;
 
-  r.has_knob = d.gear_knob.valid();
+  // The knob and dot are AND-stencil + OR-colour pairs, so they are drawable
+  // only when both halves are present (the mask shares the colour's rect).
+  r.has_knob = d.gear_knob.valid() && d.gear_knob_mask.valid();
   r.knob_w = static_cast<float>(d.gear_knob.width) * sx;
   r.knob_h = static_cast<float>(d.gear_knob.height) * sy;
   r.knob_pivot_x = static_cast<float>(d.gear_knob.pivot_x);
   r.knob_pivot_y = static_cast<float>(d.gear_knob.pivot_y);
 
-  r.has_dot = d.steer_dot.valid();
+  r.has_dot = d.steer_dot.valid() && d.steer_dot_mask.valid();
   r.dot_w = static_cast<float>(d.steer_dot.width) * sx;
   r.dot_h = static_cast<float>(d.steer_dot.height) * sy;
   r.dot_pivot_x = static_cast<float>(d.steer_dot.pivot_x);

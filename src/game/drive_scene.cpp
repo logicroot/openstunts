@@ -410,8 +410,11 @@ bool DriveScene::on_enter() {
       world::load_dashboard(asset_dir_, car_id_, &dashboard_)) {
     // Palette indices -> RGBA. The RLE decoder leaves skipped (transparent) runs
     // as 0xFF; the cockpit panels are opaque, so leave those pixels clear. The
-    // OR-blits (turned-wheel patches, digits, "dast") additionally treat palette
-    // index 0 as a no-op, so `transparent_index` lets them keep it clear too.
+    // OR-blits (turned-wheel patches, digits, "dast", the gear knob and the
+    // steering dot) additionally treat palette index 0 as a no-op, so
+    // `transparent_index` lets them keep it clear too. The paired AND stencils
+    // ("inm"/"dasm"/"gnab"/"dota") are uploaded normally: their 0xFF (keep the
+    // destination) is transparent and their 0x00 (clear to black) is opaque.
     const auto upload_sprite = [this](const Sprite2D& s, Texture* tex,
                                       uint8_t transparent_index = 0xFF) {
       std::vector<uint8_t> rgba(s.pixels.size() * 4);
@@ -440,11 +443,16 @@ bool DriveScene::on_enter() {
     if (dashboard_.gear_box.valid()) {
       upload_sprite(dashboard_.gear_box, &dashboard_gear_box_texture_);
     }
-    if (dashboard_.gear_knob.valid()) {
-      upload_sprite(dashboard_.gear_knob, &dashboard_knob_texture_);
+    // The gear knob and steering dot are AND-stencil + OR-colour pairs too
+    // (loc_23120 / loc_23561): the stencil clears its footprint to black and the
+    // colour paints over it with index 0 as a no-op.
+    if (dashboard_.gear_knob.valid() && dashboard_.gear_knob_mask.valid()) {
+      upload_sprite(dashboard_.gear_knob_mask, &dashboard_knob_mask_texture_);
+      upload_sprite(dashboard_.gear_knob, &dashboard_knob_texture_, 0);
     }
-    if (dashboard_.steer_dot.valid()) {
-      upload_sprite(dashboard_.steer_dot, &dashboard_dot_texture_);
+    if (dashboard_.steer_dot.valid() && dashboard_.steer_dot_mask.valid()) {
+      upload_sprite(dashboard_.steer_dot_mask, &dashboard_dot_mask_texture_);
+      upload_sprite(dashboard_.steer_dot, &dashboard_dot_texture_, 0);
     }
     // Turned-wheel patches: the stencil stamps opaquely (index 0 = black) and
     // the patch writes its colours with index 0 as a no-op.
@@ -1052,7 +1060,10 @@ void DriveScene::draw_dashboard(int width, int height) {
   }
 
   // The gear-selector plate ("gbox"), then the lever knob ("gnob") placed by its
-  // pivot at (plate origin + CARSTATE.car_knob_x/y) (loc_230DE/loc_23120).
+  // pivot at (plate origin + CARSTATE.car_knob_x/y) (loc_230DE/loc_23120). The
+  // knob is an AND-stencil ("gnab") + OR-colour ("gnob") pair: the 0x00 of the
+  // stencil clears the footprint to black (so the knob's own index 0 pixels stay
+  // black) and the stencil's 0xFF surround is what makes the rest transparent.
   if (r.has_gear_box) {
     verts.clear();
     append_textured_quad(verts, r.gear_box_x, r.gear_box_y, r.gear_box_w,
@@ -1065,7 +1076,8 @@ void DriveScene::draw_dashboard(int width, int height) {
     verts.clear();
     append_textured_quad(verts, cx - r.knob_pivot_x * r.scale_x,
                          cy - r.knob_pivot_y * r.scale_y, r.knob_w, r.knob_h);
-    sprites_.draw(dashboard_knob_texture_, verts, width, height);
+    sprites_.draw(dashboard_knob_mask_texture_, verts, width, height, true);
+    sprites_.draw(dashboard_knob_texture_, verts, width, height, true);
   }
 
   // The steering-position indicator ("dot"): a small pivot-anchored sprite at
@@ -1088,7 +1100,9 @@ void DriveScene::draw_dashboard(int width, int height) {
                            static_cast<float>(dy) * r.scale_y -
                                r.dot_pivot_y * r.scale_y,
                            r.dot_w, r.dot_h);
-      sprites_.draw(dashboard_dot_texture_, verts, width, height);
+      // Same AND-stencil + OR-colour pair as the knob ("dota" then "dot ").
+      sprites_.draw(dashboard_dot_mask_texture_, verts, width, height, true);
+      sprites_.draw(dashboard_dot_texture_, verts, width, height, true);
     }
   }
 

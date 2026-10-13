@@ -175,7 +175,9 @@ class DriveScene : public Scene {
   Texture dashboard_instrument_texture_;  // "ins2"
   Texture dashboard_gear_box_texture_;    // "gbox"
   Texture dashboard_knob_texture_;        // "gnob"
+  Texture dashboard_knob_mask_texture_;   // "gnab" AND stencil for the knob
   Texture dashboard_dot_texture_;         // "dot"
+  Texture dashboard_dot_mask_texture_;    // "dota" AND stencil for the dot
   // The turned-wheel face patches: [0] = "ins1" (wheel held left), [1] = "ins3"
   // (held right), and their "inm1"/"inm3" AND stencils. The patches are OR-blits
   // in which palette index 0 is a no-op, so their textures keep index 0
