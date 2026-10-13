@@ -217,18 +217,77 @@ in the original's default view (`dashb_toggle = 1`, `seg005.asm`
 | `roof` | 320×9 | (0,0) | the cockpit frame; `s2d_height` is `roofbmpheight` |
 | `whl1`/`whl2`/`whl3` | 184×32 | (40,168) | steering wheel: turned left / centred / turned right |
 | `gbox` | 64×56 | (256,144) | the gear-box gauge (animated) |
-| `ins1`/`ins2`/`ins3`, `inm1`/`inm3` | | | speedometer/tachometer cluster and indicator masks |
-| `dast`/`dasm` | | | tachometer needle and mask (older cars only) |
+| `ins1`/`ins3` | 72×18 | (64,21)/(0,21) | indicator strips across the top of the panel |
+| `ins2` | 136×39 | (64,148) | the instrument face (speedometer + tachometer dials) |
+| `inm1`/`inm3` | 72×19 | | indicator masks |
+| `dast`/`dasm` | | | tachometer needle and mask (older cars only; not in `COUN`) |
 
-The gear lever (`gnob` + `dot`/`dota`/`dot1`/`dot2`) lives in the companion
-archive `STDB<car>.PVS`.
+The gear-box face `gbox` (64×56 at (256,144)) and the gear lever
+(`gnob`, `gnab` and the `dot`/`dota`/`dot1`/`dot2` steering dots) live in the
+companion archive `STDB<car>.PVS`.
 
 The original renders the 3D world inside `rect_windshield =
 [roofbmpheight, dashbmp_y]` and composites the panel over the rest. The port
-draws `dash`, `roof` and the steering wheel opaquely; the wheel is picked from
-`whl1`/`whl2`/`whl3` by the steering angle (`seg005.asm loc_2319D`:
-`trunc(angle/8)` against a ±10 dead zone). The gear lever and gauges are not
-wired up yet.
+draws, in this order, `dash` → steering wheel → `ins2` → needles → `gbox` →
+gear knob → steering dot → `roof`. All of the panel art is blitted opaquely,
+so later pieces hide earlier ones where they overlap. In particular:
+
+* The steering wheel is picked from `whl1`/`whl2`/`whl3` by the steering angle
+  (`seg005.asm loc_2319D`: `trunc(angle/8)` against a ±10 dead zone), then
+  `ins2` is blitted over its lower rows. `ins2`'s upper 20 rows are identical to
+  `dash`, so only the turned-wheel art inside the wheel cut-out is actually
+  hidden.
+* `gbox` is blitted at (256,144), overwriting the `dash` art underneath it
+  every frame; the `dash` region below the gear box is therefore invisible.
+
+### Cockpit instruments (`seg005.asm setup_car_shapes`, case 2)
+
+The gauge geometry comes from the car's `simd` chunk (`CARSTATE`/`SIMD`,
+`c/externs.h`): the needle origins are `POINT2D`s and each needle's tip list is
+a run of byte-sized `(x, y)` pairs anchored at its origin.
+
+| field | offset | meaning |
+| --- | --- | --- |
+| `steeringdots[62]` | 234 | 31 steering-dot `(x, y)` screen positions |
+| `spdcenter` | 296 | speedometer needle origin |
+| `spdnumpoints` | 300 | number of speedometer tip points |
+| `spdpoints[208]` | 302 | speedometer tip list (byte pairs) |
+| `revcenter` | 510 | tachometer needle origin |
+| `revnumpoints` | 514 | number of tachometer tip points |
+| `revpoints[256]` | 516 | tachometer tip list (byte pairs) |
+
+Each needle is a single line `preRender_line(meter_needle_color, center, tip)`.
+`meter_needle_color` is initialised from `dialog_fnt_colour` (palette 15) when
+the skybox loads (`seg003.asm load_skybox`), so the port reuses the HUD
+foreground colour.
+
+The gauge origins are relative to the `ins2` sprite; the tips are indexed by:
+
+* **speedometer** — from `spdcenter.y`: `-1` (`0xFFFF`) ⇒ no needle, `0` ⇒ the
+  digital readout (`car_speed >> 8` drawn with `dig0`..`dig9` placed at
+  `spdpoints[0..5]`), anything else ⇒ analog with index
+  `min(car_speed / 640, spdnumpoints - 1)`. `car_speed` is the rev-coupled
+  speed (the port's `car_rev_speed`); `car_speed2` is `car_actual_speed`.
+* **tachometer** — always analog, index
+  `min((uint16_t)car_currpm >> 7, revnumpoints - 1)`.
+
+The Countach (`CARCOUN.RES`) is analog on both dials
+(`spdcenter = (25,19)`, 84 points; `revcenter = (107,19)`, 71 points); the
+Vetty (`CARVETT.RES`) has `spdcenter.y == 0`, i.e. the digital speedometer.
+
+The gear knob is drawn pivot-anchored (`sprite_putimage_or_alt`) at
+`gbox_pos + knob_points[gear]`: `gnob`'s pivot (12,11) is its centre, so the
+lever sits centred on the selected gate. `car_knob_x/y` are seeded to
+`knob_points[1]` at race start (`restunts.c init_game_state`).
+
+The steering dot (`stdb`/`dot`) is staged the same way: the steering angle maps
+to an index `min(|sign(a) * (|a| >> 3)|, 30)` into `steeringdots`, and the dot
+is drawn at `steeringdots[i]` with its x mirrored about `steeringdots[0].x`
+(`2*steeringdots[0].x - x`) when steering left. Note the resource id is the
+four-character `"dot "` (trailing space).
+
+The digital speed readout (`dig0`..`dig9`) and the `dast`/`dasm` older-car
+tachometer overlay are not drawn yet.
 
 ## Track assembly (`.TRK` → geometry)
 

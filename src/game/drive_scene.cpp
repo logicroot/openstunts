@@ -422,6 +422,18 @@ bool DriveScene::on_enter() {
         upload_sprite(dashboard_.wheel[i], &dashboard_wheel_textures_[i]);
       }
     }
+    if (dashboard_.ins2.valid()) {
+      upload_sprite(dashboard_.ins2, &dashboard_instrument_texture_);
+    }
+    if (dashboard_.gear_box.valid()) {
+      upload_sprite(dashboard_.gear_box, &dashboard_gear_box_texture_);
+    }
+    if (dashboard_.gear_knob.valid()) {
+      upload_sprite(dashboard_.gear_knob, &dashboard_knob_texture_);
+    }
+    if (dashboard_.steer_dot.valid()) {
+      upload_sprite(dashboard_.steer_dot, &dashboard_dot_texture_);
+    }
   } else if (have_palette) {
     S3D_WARN("dashboard: STDACOUN.PVS not found; the cockpit panel is disabled");
   }
@@ -492,6 +504,12 @@ void DriveScene::reset_car() {
   car_.car_changing_gear = physics::kGearChangeInactive;
   car_.car_gearratio = spec_.gear_ratios[1];
   car_.car_gearratioshr8 = static_cast<uint16_t>(car_.car_gearratio >> 8);
+  // Seat the gear lever at first gear (restunts.c init_game_state: the knob
+  // starts at knob_points[1], which is what the cockpit gear box draws).
+  car_.car_knob_x = spec_.knob_points[1].x;
+  car_.car_knob_x2 = car_.car_knob_x;
+  car_.car_knob_y = spec_.knob_points[1].y;
+  car_.car_knob_y2 = car_.car_knob_y;
   car_.car_currpm = spec_.idle_rpm;
   car_.car_sumSurfRearWheels = 1;
   car_.car_sumSurfAllWheels = 1;
@@ -933,8 +951,9 @@ void DriveScene::draw_dashboard(int width, int height) {
 
   // Drawn last so the opaque panel hides the world and HUD outside the
   // windshield (the original composites the dashboard over the 3D band). The
-  // original draws roof, dash, then the steering wheel (seg005.asm
-  // setup_car_shapes loc_22F76), the wheel over the dash's black cut-out.
+  // order follows seg005.asm setup_car_shapes: loc_22F76 (case 1) draws the
+  // roof/dash/wheel, then loc_23030 (case 2) redraws the wheel and stamps the
+  // gear plate, instrument face (with its needles) and steering dot over it.
   std::vector<Vertex> verts;
   append_textured_quad(verts, r.dash_x, r.dash_y, r.dash_w, r.dash_h);
   sprites_.draw(dashboard_textures_[0], verts, width, height);
@@ -948,9 +967,107 @@ void DriveScene::draw_dashboard(int width, int height) {
     }
   }
 
+  // The instrument face ("ins2") is stamped over the wheel's upper rows, then
+  // the needles are drawn into it (loc_2350B copies the completed face buffer).
+  if (r.has_instruments) {
+    verts.clear();
+    append_textured_quad(verts, r.instrument_x, r.instrument_y, r.instrument_w,
+                         r.instrument_h);
+    sprites_.draw(dashboard_instrument_texture_, verts, width, height);
+    draw_instrument_needles(r, width, height);
+  }
+
+  // The gear-selector plate ("gbox"), then the lever knob ("gnob") placed by its
+  // pivot at (plate origin + CARSTATE.car_knob_x/y) (loc_230DE/loc_23120).
+  if (r.has_gear_box) {
+    verts.clear();
+    append_textured_quad(verts, r.gear_box_x, r.gear_box_y, r.gear_box_w,
+                         r.gear_box_h);
+    sprites_.draw(dashboard_gear_box_texture_, verts, width, height);
+  }
+  if (r.has_knob) {
+    const float cx = r.gear_box_x + static_cast<float>(car_.car_knob_x) * r.scale_x;
+    const float cy = r.gear_box_y + static_cast<float>(car_.car_knob_y) * r.scale_y;
+    verts.clear();
+    append_textured_quad(verts, cx - r.knob_pivot_x * r.scale_x,
+                         cy - r.knob_pivot_y * r.scale_y, r.knob_w, r.knob_h);
+    sprites_.draw(dashboard_knob_texture_, verts, width, height);
+  }
+
+  // The steering-position indicator ("dot"): a small pivot-anchored sprite at
+  // the authored SIMD steeringdots entry for the current steering value,
+  // mirrored about the centre entry when steering left (loc_23561/loc_235F9).
+  if (r.has_dot) {
+    const int dot_count =
+        static_cast<int>(sizeof(spec_.steering_dots) / sizeof(spec_.steering_dots[0]) / 2);
+    const int index =
+        world::dashboard_steer_dot_index(car_.car_steeringAngle, dot_count);
+    if (index >= 0) {
+      int dx = 0, dy = 0;
+      world::dashboard_point_at(spec_.steering_dots, index, &dx, &dy);
+      if (world::dashboard_steer_value(car_.car_steeringAngle) < 0) {
+        dx = 2 * static_cast<int>(spec_.steering_dots[0]) - dx;
+      }
+      verts.clear();
+      append_textured_quad(verts, static_cast<float>(dx) * r.scale_x -
+                                      r.dot_pivot_x * r.scale_x,
+                           static_cast<float>(dy) * r.scale_y -
+                               r.dot_pivot_y * r.scale_y,
+                           r.dot_w, r.dot_h);
+      sprites_.draw(dashboard_dot_texture_, verts, width, height);
+    }
+  }
+
   verts.clear();
   append_textured_quad(verts, r.roof_x, r.roof_y, r.roof_w, r.roof_h);
   sprites_.draw(dashboard_textures_[1], verts, width, height);
+}
+
+void DriveScene::draw_instrument_needles(const world::DashboardRects& r,
+                                         int width, int height) {
+  // meter_needle_color is `dialog_fnt_colour` (seg003.asm load_skybox), which is
+  // the same palette index 15 as the HUD foreground.
+  const float sx = r.scale_x;
+  const float sy = r.scale_y;
+  const float ox = r.instrument_x;
+  const float oy = r.instrument_y;
+  const int speed_points =
+      std::min<int>(spec_.speed_num_points,
+                    static_cast<int>(sizeof(spec_.speed_points) / 2));
+  const int rev_points =
+      std::min<int>(spec_.rev_num_points,
+                    static_cast<int>(sizeof(spec_.rev_points) / 2));
+  // A 1-pixel authored line, scaled like the rest of the panel.
+  const float thickness = std::max(1.0f, (sx + sy) * 0.5f);
+
+  std::vector<Vertex> lines;
+  // The analog speedometer needle is skipped when the SIMD classifies the gauge
+  // as digital (`spdcenter.y == 0`) or absent (`spdcenter.y == -1`) (loc_2328A).
+  if (world::dashboard_speedo_kind(spec_.speed_center.y) == world::SpeedoKind::Analog) {
+    const int index = world::dashboard_speed_index(
+        static_cast<int32_t>(car_.car_rev_speed), speed_points);
+    if (index >= 0) {
+      int ex = 0, ey = 0;
+      world::dashboard_point_at(spec_.speed_points, index, &ex, &ey);
+      append_segment(lines, ox + static_cast<float>(spec_.speed_center.x) * sx,
+                     oy + static_cast<float>(spec_.speed_center.y) * sy,
+                     ox + static_cast<float>(ex) * sx,
+                     oy + static_cast<float>(ey) * sy, thickness, hud_fg_);
+    }
+  }
+  // The tachometer needle is always drawn (loc_23485).
+  if (rev_points > 0) {
+    const int index = world::dashboard_rev_index(car_.car_currpm, rev_points);
+    if (index >= 0) {
+      int ex = 0, ey = 0;
+      world::dashboard_point_at(spec_.rev_points, index, &ex, &ey);
+      append_segment(lines, ox + static_cast<float>(spec_.rev_center.x) * sx,
+                     oy + static_cast<float>(spec_.rev_center.y) * sy,
+                     ox + static_cast<float>(ex) * sx,
+                     oy + static_cast<float>(ey) * sy, thickness, hud_fg_);
+    }
+  }
+  if (!lines.empty()) hud_.draw(lines, width, height);
 }
 
 void DriveScene::render(Renderer& renderer, int width, int height) {

@@ -70,6 +70,13 @@ class DriveScene : public Scene {
   // hidden or the asset was not loaded.
   void draw_dashboard(int width, int height);
 
+  // Draws the speedometer and tachometer needles over the instrument face:
+  // single-colour lines from SIMD spdcenter/revcenter to the point selected by
+  // the car's speed and rpm (seg005.asm loc_23456/loc_23485, meter_needle_color
+  // = palette 15). No-op for digital/absent speedometers.
+  void draw_instrument_needles(const world::DashboardRects& r, int width,
+                               int height);
+
   // Screen row (pixels, top-left origin) of the horizon for `camera`: the
   // projection of the world-horizontal direction, i.e. where the view ray is
   // level. The original derives the same line from two far ground points.
@@ -153,6 +160,13 @@ class DriveScene : public Scene {
   world::Dashboard dashboard_;
   Texture dashboard_textures_[2];  // [0] = dash, [1] = roof
   Texture dashboard_wheel_textures_[3];  // "whl1"/"whl2"/"whl3"
+  // The instrument face ("ins2"), gear-selector plate ("gbox"), gear lever
+  // ("gnob") and steering dot ("dot"); the needles/knob/dot are drawn over the
+  // panel each frame (seg005.asm setup_car_shapes case 2).
+  Texture dashboard_instrument_texture_;  // "ins2"
+  Texture dashboard_gear_box_texture_;    // "gbox"
+  Texture dashboard_knob_texture_;        // "gnob"
+  Texture dashboard_dot_texture_;         // "dot"
   bool dashboard_on_ = true;
 
   std::string screenshot_path_;

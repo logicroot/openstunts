@@ -83,6 +83,18 @@ bool CarSpec::parse_simd(const uint8_t* data, size_t size) {
     wheel_coords[i].z = read_i16(data, size, 210 + i * 6 + 4, &ok);
   }
 
+  // Cockpit instrument geometry (see the header): the byte-pair needle/dot
+  // lists sit in the gaps between the 16-bit scalar fields.
+  std::memcpy(steering_dots, data + 234, sizeof(steering_dots));
+  speed_center.x = read_i16(data, size, 296, &ok);
+  speed_center.y = read_i16(data, size, 298, &ok);
+  speed_num_points = read_i16(data, size, 300, &ok);
+  std::memcpy(speed_points, data + 302, sizeof(speed_points));
+  rev_center.x = read_i16(data, size, 510, &ok);
+  rev_center.y = read_i16(data, size, 512, &ok);
+  rev_num_points = read_i16(data, size, 514, &ok);
+  std::memcpy(rev_points, data + 516, sizeof(rev_points));
+
   return ok;
 }
 

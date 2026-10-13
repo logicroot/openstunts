@@ -60,6 +60,17 @@ struct CarSpec {
   int16_t car_height = 0;
   Vector3i16 wheel_coords[4] = {};
 
+  // Cockpit instrument geometry (SIMD struct, restunts c/externs.h). Unlike the
+  // 16-bit `knob_points`, the needle-tip and steering-dot lists are byte (x, y)
+  // pairs authored in the instrument panel's space (see world/dashboard.h).
+  uint8_t steering_dots[62] = {0};  // steeringdots @234, 31 pairs
+  Point2D speed_center = {};        // spdcenter    @296 (needle origin)
+  int16_t speed_num_points = 0;     // spdnumpoints @300
+  uint8_t speed_points[208] = {0};  // spdpoints    @302, 104 pairs
+  Point2D rev_center = {};          // revcenter    @510 (needle origin)
+  int16_t rev_num_points = 0;       // revnumpoints @514
+  uint8_t rev_points[256] = {0};    // revpoints    @516, 128 pairs
+
   // Human-readable names from the other chunks.
   std::string description;   // "edes" chunk (]]]-separated text)
   std::string driver_name;   // "gnam" chunk (player name)
