@@ -394,3 +394,72 @@ Terrain shape indices (all shapes span roughly one 1024-unit cell):
 The four rotations of each sloped terrain shape (0/768/512/256) select which
 corner is raised. `game3dshapes[]` is indexed by the fixed `game_shape_names`
 order; only indices ≤ 110 are track/scenery (124–130 are cars and explosions).
+
+## Crash debris (`state_op_unk` / `sub_19BA0`)
+
+A hard wall hit throws a burst of flat shards off the car. The original keeps
+24 of them in fixed engine-state slots, shared by the player, the opponent and
+smashed track objects. Sources:
+`reference/restunts/src/restunts/asmorig/seg001.asm` `state_op_unk` (spawn,
+~9215) and `sub_19BA0` (motion, ~9386); the draw is in `frame.c` (~903).
+
+| slot | field | meaning |
+|---|---|---|
+| — | `game_longs1/2/3[i]` | position, in 1/64 world units, **relative to the owner car's pivot** (x/z horizontal, y up) |
+| — | `field_2FE[i]`, `field_32E[i]` | tumble about the shard's local z / x (1/1024 turn) |
+| — | `field_35E[i]` | launch heading |
+| — | `field_38E[i]` | launch speed (1/64 units per 20 Hz frame); **0 marks the slot free** |
+| — | `field_3BE[i]` | vertical speed; gravity (0x13) is subtracted every frame |
+| — | `field_42B[i]` | shard index, see the table below |
+| — | `field_443[i]` | owner: 0 player, 1 opponent, ≥ 2 a track object |
+| — | `field_42A` | "any slot live", re-derived every frame |
+
+`state_op_unk(owner, car_yaw, extra)` picks one of two burst profiles from the
+owner:
+
+| | owner < 2 (car) | owner ≥ 2 (track object) |
+|---|---|---|
+| base heading | `car_yaw` | `car_yaw - 0x60` |
+| arc (`var_2`) | `0x400` (full circle) | `0xC0` |
+| cap (`var_E`) | 18 | 8 |
+| shard base | `owner*4 + 4` | 0 |
+| vertical multiplier | 6 | 1 |
+
+It fills `min(free_slots, cap)` free slots; the *n*th piece gets
+`field_42B = (n & 3) + base`, `field_35E = ((n * arc) / count + heading) & 0x3FF`
+(an even spread over the arc), `field_2FE/field_32E = rnd * 4` and
+`field_38E = ((rnd * 6) >> 2) + extra + 0x180`, consuming three kevinrandom
+bytes per piece in that order. `field_3BE = (multiplier * field_38E) >> 2`.
+
+`field_42B` indexes `sceneshapes3`, whose `shape` offsets resolve through
+`game3dshapes` to:
+
+| `field_42B` | shapes |
+|---|---|
+| 0..3 | `exp0`..`exp3` of `GAME1`/`GAME2` (generic scenery shards) |
+| 4..7 | the player car's own `exp0`..`exp3` (`ST<ID>.P3S`) |
+| 8..11 | the opponent's `exp0`..`exp3` |
+
+The car shards are tiny flat polygons (±5..±15 units at `y = 0`); `exp2` in
+`ST<ID>.P3S` is a bare 2-vertex **line**. Each shard carries 7 paint slots (the
+per-livery material variants), the same ones the car body uses.
+
+`sub_19BA0` advances each live piece one 20 Hz frame: it adds the tumble step
+(0x10) to `field_2FE/field_32E`, moves the piece by
+`mat_rot_zxy(0, 0, field_35E, 1) * (0, 0, field_38E)` (only x/z; gravity owns
+y), subtracts gravity from `field_3BE` and adds it to `game_longs2`, applies
+gravity a second time in the 10 Hz slow-motion mode, and retires the piece
+(`field_38E = 0`) once `game_longs2 + playerstate.car_posWorld1.ly < 0`. Every
+piece's height is tested against the **player's** position, even the opponent's
+and the scenery's.
+
+The renderer places the piece at `(game_longs + car_posWorld) >> 6` and tumbles
+it with `mat_rot_zxy(rotvec.x, rotvec.y, rotvec.z, 0)` where
+`rotvec = (-field_2FE, -field_32E, -field_35E)` (the same negation the car body
+uses).
+
+`kevinrandom` (`get_kevinrandom`, seeded with the 6 bytes `"kevin\0"`) is a
+6-byte additive generator with a 6-byte counter; it returns `seed[0]` after
+each step. The original draws from it for the race line-up and other things
+too, so the port's debris angles/speeds are repeatable within a run but do not
+match a recorded original run tick-for-tick.

@@ -213,6 +213,22 @@ float lerp_angle(int16_t prev, int16_t curr, float alpha) {
   return (static_cast<float>(prev) + (static_cast<float>(curr) - static_cast<float>(prev)) * alpha);
 }
 
+// Rigid model matrix from a 1.14 physics matrix and a world position. The
+// conversion matches the track builder's fixed_model so a shape drawn through
+// it lands exactly where the physics puts it.
+glm::mat4 fixed_model_matrix(const fixed::Mat3& rot, const glm::vec3& pos) {
+  glm::mat4 model(1.0f);
+  for (int row = 0; row < 3; ++row) {
+    for (int col = 0; col < 3; ++col) {
+      model[col][row] = static_cast<float>(rot.at(row, col)) / 16384.0f;
+    }
+  }
+  model[3][0] = pos.x;
+  model[3][1] = pos.y;
+  model[3][2] = pos.z;
+  return model;
+}
+
 }  // namespace
 
 DriveScene::DriveScene(Track track, std::string asset_dir, std::string car_id)
@@ -286,6 +302,7 @@ bool DriveScene::on_enter() {
   }
   wheel_pose_ = world::CarWheelPose{};
   build_car_meshes();
+  build_debris_meshes(lib);
   if (car_mesh_.empty()) {
     S3D_WARN("player car shapes not found; driving invisible");
   }
@@ -533,6 +550,37 @@ void DriveScene::build_car_meshes() {
   car_mesh_braking_ = mbb.to_mesh();
 }
 
+void DriveScene::build_debris_meshes(const ShapeLibrary& track_lib) {
+  // frame.c draws each debris piece as sceneshapes3[field_42B], which resolves
+  // through game3dshapes to:
+  //   0..3   "exp0".."exp3" of GAME1/GAME2 (generic scenery shards)
+  //   4..7   the player car's own "exp0".."exp3" (ST<ID>.P3S)
+  //   8..11  the opponent's
+  // The shards are small flat polygons; build one local-space mesh per shard and
+  // per archive, and let the render pass place each live piece.
+  const Palette* pal = have_palette_ ? &palette_ : nullptr;
+  const auto shard_color = [pal]() -> world::PaintColorFn {
+    return [pal](uint8_t paint) -> glm::vec4 {
+      if (pal != nullptr) return world::car_primitive_color(paint, *pal, glm::vec4(1.0f));
+      return world::track_paint_color(paint);
+    };
+  };
+  const auto build_from = [this, &shard_color](const ShapeLibrary& lib, int archive) {
+    for (int shard = 0; shard < 4; ++shard) {
+      const std::string name = std::string("exp") + static_cast<char>('0' + shard);
+      const Shape3D* shape = lib.find(name);
+      if (shape == nullptr) continue;
+      MeshBuilder mb;
+      MeshBuilder line_mb;
+      world::append_shape(mb, *shape, glm::mat4(1.0f), shard_color(), 0, &line_mb);
+      debris_meshes_[archive][shard] = mb.to_mesh();
+      debris_line_meshes_[archive][shard] = line_mb.to_mesh();
+    }
+  };
+  build_from(track_lib, 0);
+  if (car_lib_ != nullptr) build_from(*car_lib_, 1);
+}
+
 void DriveScene::reset_car() {
   car_ = physics::CarState{};
   crash_end_frame_ = -1;
@@ -583,6 +631,12 @@ void DriveScene::reset_car() {
   display_prev_ = car_;
   accumulator_ = 0.0;
 
+  // No debris at the start of a run. The original seeds kevinrandom with
+  // "kevin" when the race is set up (restunts.c init_game_state).
+  debris_.clear();
+  debris_prev_.clear();
+  kevin_rng_.reset("kevin");
+
   // The reference resets the race clock (game_frame) and finish state at race
   // setup; "R" restarts the run the same way.
   game_frame_ = 0;
@@ -603,6 +657,11 @@ void DriveScene::physics_tick(const Controls& controls) {
   ++game_frame_;      // drives the animated track objects (windmill, sign, ...)
   race_.tick();       // 20 Hz race clock (restunts state.game_frame)
 
+  // Snapshot the debris for render interpolation and remember the crash flag:
+  // the burst fires on the frame it turns into the collision state.
+  debris_prev_ = debris_;
+  const int8_t crash_before = car_.car_crashBmpFlag;
+
   uint8_t input_flags = physics::kInputNone;
   if (controls.throttle > 0.05f) input_flags |= physics::kInputAccelerate;
   if (controls.throttle < -0.05f) input_flags |= physics::kInputBrake;
@@ -618,6 +677,18 @@ void DriveScene::physics_tick(const Controls& controls) {
   physics::update_grip(&car_, spec_);
   const auto sampler = [this](float wx, float wz) { return ground_sample(track_, wx, wz); };
   physics::step_car_motion(&car_, spec_, physics::kGameFrameRateNormal, sampler, &collision_);
+
+  // Crash debris (state_op_unk): a hard enough wall hit throws off a burst of
+  // the car's own "exp" shards. The original spawns them from
+  // update_crash_state (player_op) on the frame car_crashBmpFlag becomes 1 and
+  // steps them in sub_19BA0 right after the car physics, so spawn then update
+  // here. (The original sparks before the wheels move, so it sees the previous
+  // tick's yaw; the burst's base heading is the only field that notices.)
+  if (car_.car_crashBmpFlag == physics::kCrashEventCollision &&
+      crash_before == physics::kCrashEventNone) {
+    physics::spawn_debris(&debris_, physics::kDebrisOwnerPlayer, car_.car_rotate.x, 0,
+                          &kevin_rng_);
+  }
 
   // Animate the wheels exactly like the original: frame.c calls sub_204AE every
   // frame with car_steeringAngle and car_rc2 (the per-wheel suspension travel),
@@ -675,6 +746,11 @@ void DriveScene::physics_tick(const Controls& controls) {
   pose.rot_z = car_.car_rotate.z;  // roll
   pose.crashed = car_.car_crashBmpFlag != 0;
   race_.update_checkpoint(track_, pose);
+
+  // Crash debris motion (sub_19BA0), gated on "any piece live" (field_42A).
+  if (debris_.any_active()) {
+    physics::update_debris(&debris_, car_, physics::kGameFrameRateNormal);
+  }
 }
 
 void DriveScene::update_camera() {
@@ -758,18 +834,40 @@ glm::mat4 DriveScene::car_model_matrix(float alpha) const {
       fixed::mat_rot_zxy(physics::wrap_negate(roll256), physics::wrap_negate(pitch256),
                          physics::wrap_negate(yaw256), 0);
 
-  glm::mat4 model(1.0f);
-  for (int row = 0; row < 3; ++row) {
-    for (int col = 0; col < 3; ++col) {
-      model[col][row] = static_cast<float>(world_rot.at(row, col)) / 16384.0f;
-    }
-  }
-  const glm::vec3 pos = car_world_position(alpha);
-  model[3][0] = pos.x;
-  model[3][1] = pos.y;
-  model[3][2] = pos.z;
+  glm::mat4 model = fixed_model_matrix(world_rot, car_world_position(alpha));
   model = model * glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -kCarBodyDrop, 0.0f));
   return model;
+}
+
+glm::mat4 DriveScene::debris_model_matrix(const physics::DebrisPiece& prev,
+                                          const physics::DebrisPiece& curr,
+                                          float alpha) const {
+  // Each piece is placed at (game_longs + car_posWorld) >> 6 and tumbled with
+  // mat_rot_zxy(rotvec) where rotvec = (-field_2FE, -field_32E, -field_35E),
+  // exactly as frame.c builds the debris TRANSFORMEDSHAPE3D and the shape
+  // transform consumes it (shape3d.c: mat_rot_zxy(rotvec.x, rotvec.y,
+  // rotvec.z, 0)).
+  const bool blend = prev.active() && curr.active();
+  const float a = blend ? alpha : 1.0f;
+  const auto lerp_i32 = [a](int32_t p, int32_t c) {
+    return static_cast<float>(p) + (static_cast<float>(c) - static_cast<float>(p)) * a;
+  };
+  // The piece's position is the owner car's world position plus the piece's own
+  // car-relative offset, both interpolated within the tick (interpolating the
+  // two terms separately is the same as interpolating the sum). The car term
+  // uses the same alpha as the car body so the shards stay locked to it.
+  const float scale = 1.0f / 64.0f;
+  const glm::vec3 rel(lerp_i32(prev.x, curr.x), lerp_i32(prev.y, curr.y),
+                      lerp_i32(prev.z, curr.z));
+  const glm::vec3 pos = car_world_position(alpha) + rel * scale;
+
+  const int16_t sz = static_cast<int16_t>(lerp_angle(prev.spin_z, curr.spin_z, a));
+  const int16_t sx = static_cast<int16_t>(lerp_angle(prev.spin_x, curr.spin_x, a));
+  const int16_t ang = static_cast<int16_t>(lerp_angle(prev.angle, curr.angle, a));
+  const fixed::Mat3 rot = fixed::mat_rot_zxy(physics::wrap_negate(sz),
+                                             physics::wrap_negate(sx),
+                                             physics::wrap_negate(ang), 0);
+  return fixed_model_matrix(rot, pos);
 }
 
 bool DriveScene::car_screen_rect(const Camera& camera, float alpha, int width,
@@ -1208,6 +1306,25 @@ void DriveScene::render(Renderer& renderer, int width, int height) {
     const Mesh& body =
         (car_.car_is_braking != 0 && !car_mesh_braking_.empty()) ? car_mesh_braking_ : car_mesh_;
     renderer.draw_world(body, render_cam, car_model_matrix(alpha));
+  }
+
+  // Crash debris (frame.c ~903): every live piece (field_38E != 0) is drawn as
+  // its sceneshapes3 shard at (game_longs + car_posWorld) >> 6 with its tumble
+  // rotation. field_42B selects both the shard and the owning archive (see
+  // build_debris_meshes).
+  if (debris_.any_active()) {
+    for (int i = 0; i < physics::kDebrisSlots; ++i) {
+      const physics::DebrisPiece& curr = debris_.pieces[i];
+      if (!curr.active()) continue;
+      const int shard = physics::debris_shard_index(curr.shape);
+      const int archive = physics::debris_archive_index(curr.shape);
+      const Mesh& mesh = debris_meshes_[archive][shard];
+      const Mesh& lines = debris_line_meshes_[archive][shard];
+      if (mesh.empty() && lines.empty()) continue;
+      const glm::mat4 model = debris_model_matrix(debris_prev_.pieces[i], curr, alpha);
+      if (!mesh.empty()) renderer.draw_world(mesh, render_cam, model);
+      if (!lines.empty()) renderer.draw_world_lines(lines, render_cam, model);
+    }
   }
 
   glm::vec4 car_rect;

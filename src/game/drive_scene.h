@@ -14,8 +14,10 @@
 #include "assets/palette.h"
 #include "assets/sprite2d.h"
 #include "assets/trk.h"
+#include "core/kevin_random.h"
 #include "game/race_state.h"
 #include "game/scene.h"
+#include "physics/car_debris.h"
 #include "physics/car_state.h"
 #include "physics/track_collision.h"
 #include "render/camera.h"
@@ -104,6 +106,16 @@ class DriveScene : public Scene {
   float car_roll(float alpha) const;
   glm::mat4 car_model_matrix(float alpha) const;
 
+  // Builds the four crash-debris shard meshes ("exp0".."exp3") for the scenery
+  // archive (GAME1/GAME2) and the player car (ST<ID>.P3S). The opponent's set
+  // is not loaded until the opponent car exists.
+  void build_debris_meshes(const ShapeLibrary& track_lib);
+  // Interpolated world matrix of one debris piece: the original places it at
+  // `(game_longs + car_posWorld) >> 6` and tumbles it with
+  // mat_rot_zxy(-field_2FE, -field_32E, -field_35E).
+  glm::mat4 debris_model_matrix(const physics::DebrisPiece& prev,
+                                const physics::DebrisPiece& curr, float alpha) const;
+
   Track track_;
   std::string asset_dir_;
   std::string car_id_;  // player car id, upper-cased (e.g. "COUN", "VETT")
@@ -131,6 +143,20 @@ class DriveScene : public Scene {
   // last built with (frame.c sub_204AE: steering + per-wheel suspension).
   std::shared_ptr<ShapeLibrary> car_lib_;
   world::CarWheelPose wheel_pose_;
+
+  // Crash debris (restunts state_op_unk / sub_19BA0): up to 24 shards spawned
+  // when the player car enters the crash state, simulated at 20 Hz and drawn as
+  // the car's own "exp0".."exp3" pieces. `debris_meshes_[archive][shard]` are
+  // prebuilt in local space: archive 0 = GAME1/GAME2 scenery shards, 1 = the
+  // player car, 2 = the opponent (not loaded until the opponent exists).
+  physics::DebrisField debris_;
+  physics::DebrisField debris_prev_;  // debris state at the previous physics tick
+  KevinRandom kevin_rng_;             // get_kevinrandom, seeded "kevin"
+  Mesh debris_meshes_[3][4];
+  // exp2 shards are a bare 2-vertex line in ST<ID>.P3S; they are drawn with
+  // draw_world_lines rather than as a triangle.
+  Mesh debris_line_meshes_[3][4];
+
   // Player car local bounding box (car_mesh_ vertices, identity model), used to
   // project the car to screen for the crash explosion.
   glm::vec3 car_bounds_min_{0.0f};
