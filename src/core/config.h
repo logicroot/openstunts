@@ -16,6 +16,9 @@ struct Config {
   bool show_fps = true;
   std::string asset_dir;
   std::string last_track = "DEFAULT.TRK";
+  // The player car id (the original's gameconfig.game_playercarid), e.g. "COUN"
+  // (Countach) or "VETT" (Vetty). Selects CAR<ID>.RES / ST<ID>.P3S / STDA<ID>.PVS.
+  std::string player_car = "COUN";
 
   // Returns the default config file path:
   //   Linux/macOS: $XDG_CONFIG_HOME/stunts3d/config.ini or ~/.config/stunts3d/config.ini

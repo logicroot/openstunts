@@ -1,6 +1,7 @@
 #include "game/drive_scene.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <memory>
@@ -45,10 +46,10 @@ constexpr float kFollowVerticalStep = 30.0f;
 
 constexpr float kAngleToRadians = 6.28318530718f / 1024.0f;
 
-// The port drives the Countach (gameconfig.game_playercarid default "COUN"): its
+// The default player car id (gameconfig.game_playercarid): the Countach. Its
 // performance data is CARCOUN.RES, its bodywork STCOUN.P3S and its cockpit
-// dashboard STDACOUN.PVS.
-constexpr const char* kPlayerCarId = "COUN";
+// dashboard STDACOUN.PVS. Overridable with --car / the config's player_car.
+constexpr const char* kDefaultPlayerCarId = "COUN";
 
 // 8-bit RGB for a VGA palette index (the original draws HUD text with the
 // palette indices 15 = white and 0 = black drop shadow).
@@ -155,9 +156,9 @@ void fill_fallback_torque_curve(CarSpec* spec) {
   }
 }
 
-CarSpec load_or_default_spec(const std::string& asset_dir) {
+CarSpec load_or_default_spec(const std::string& asset_dir, const std::string& car_id) {
   CarSpec spec;
-  const std::string car_res = std::string("CAR") + kPlayerCarId + ".RES";
+  const std::string car_res = std::string("CAR") + car_id + ".RES";
   if (!asset_dir.empty() && CarSpec::load(path_join(asset_dir, car_res), &spec)) {
     return spec;
   }
@@ -214,8 +215,16 @@ float lerp_angle(int16_t prev, int16_t curr, float alpha) {
 
 }  // namespace
 
-DriveScene::DriveScene(Track track, std::string asset_dir)
-    : track_(std::move(track)), asset_dir_(std::move(asset_dir)) {}
+DriveScene::DriveScene(Track track, std::string asset_dir, std::string car_id)
+    : track_(std::move(track)),
+      asset_dir_(std::move(asset_dir)),
+      car_id_(std::move(car_id)) {
+  // The asset names are upper-case four-character ids (e.g. "COUN", "VETT").
+  for (char& c : car_id_) {
+    c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+  }
+  if (car_id_.empty()) car_id_ = kDefaultPlayerCarId;
+}
 
 bool DriveScene::on_enter() {
   // ---- Static world geometry -----------------------------------------------
@@ -267,12 +276,12 @@ bool DriveScene::on_enter() {
   }
 
   // ---- Player car ----------------------------------------------------------
-  spec_ = load_or_default_spec(asset_dir_);
+  spec_ = load_or_default_spec(asset_dir_, car_id_);
 
   have_palette_ = have_palette;
   car_lib_ = std::make_shared<ShapeLibrary>();
   if (asset_dir_.empty() ||
-      !world::load_car_archive(asset_dir_, kPlayerCarId, car_lib_.get())) {
+      !world::load_car_archive(asset_dir_, car_id_, car_lib_.get())) {
     car_lib_.reset();
   }
   wheel_pose_ = world::CarWheelPose{};
@@ -398,7 +407,7 @@ bool DriveScene::on_enter() {
   // frame are drawn opaquely over the bands outside the windshield; the
   // original shows this by default (dashb_toggle = 1 in a fresh race).
   if (have_palette && !asset_dir_.empty() &&
-      world::load_dashboard(asset_dir_, kPlayerCarId, &dashboard_)) {
+      world::load_dashboard(asset_dir_, car_id_, &dashboard_)) {
     // Palette indices -> RGBA. The RLE decoder leaves skipped (transparent) runs
     // as 0xFF; the cockpit panels are opaque, so leave those pixels clear. The
     // OR-blits (turned-wheel patches, digits, "dast") additionally treat palette

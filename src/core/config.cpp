@@ -66,6 +66,7 @@ Config Config::load(const std::string& path) {
     else if (key == "show_fps") c.show_fps = parse_bool(val);
     else if (key == "asset_dir") c.asset_dir = val;
     else if (key == "last_track") c.last_track = val;
+    else if (key == "player_car") c.player_car = val;
   }
   S3D_INFO("config: loaded %s", p.c_str());
   return c;
@@ -102,6 +103,7 @@ bool Config::save(const std::string& path) const {
   out << "show_fps = " << (show_fps ? 1 : 0) << "\n";
   out << "asset_dir = " << asset_dir << "\n";
   out << "last_track = " << last_track << "\n";
+  out << "player_car = " << player_car << "\n";
   return true;
 }
 

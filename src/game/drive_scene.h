@@ -32,7 +32,9 @@ namespace s3d {
 
 class DriveScene : public Scene {
  public:
-  DriveScene(Track track, std::string asset_dir);
+  // `car_id` is the player car (the original's gameconfig.game_playercarid),
+  // e.g. "COUN" or "VETT"; it selects CAR<ID>.RES, ST<ID>.P3S and STDA<ID>.PVS.
+  DriveScene(Track track, std::string asset_dir, std::string car_id = "COUN");
 
   bool on_enter() override;
   void update(double dt, const Controls& controls) override;
@@ -104,6 +106,7 @@ class DriveScene : public Scene {
 
   Track track_;
   std::string asset_dir_;
+  std::string car_id_;  // player car id, upper-cased (e.g. "COUN", "VETT")
 
   CarSpec spec_;
   physics::CarState car_;
