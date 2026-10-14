@@ -71,6 +71,25 @@ void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
     if (prim.kind != PrimKind::Polygon) continue;
     if (prim.indices.size() < 3) continue;
 
+    // Primitive type 12 is the original's dedicated wheel ("_primtype_wheel",
+    // primtypetab[12] = 3): the six referenced vertices form two quads that
+    // share the edge (v0,v3), and the software renderer draws whichever quad
+    // faces the camera. A z-buffered renderer can simply emit both.
+    if (prim.type == 12 && prim.indices.size() >= 6) {
+      const std::vector<uint8_t>& ix = prim.indices;
+      const int quads[2][4] = {{0, 1, 2, 3}, {3, 4, 5, 0}};
+      for (const auto& q : quads) {
+        std::vector<glm::vec3> poly;
+        poly.reserve(4);
+        for (int k = 0; k < 4; ++k) {
+          const uint8_t idx = ix[static_cast<size_t>(q[k])];
+          if (idx < pts.size()) poly.push_back(pts[idx]);
+        }
+        append_polygon(mb, poly, color);
+      }
+      continue;
+    }
+
     std::vector<glm::vec3> poly;
     poly.reserve(prim.indices.size());
     for (uint8_t idx : prim.indices) {

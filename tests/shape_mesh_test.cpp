@@ -1,5 +1,8 @@
 #include <glm/glm.hpp>
 
+#include <algorithm>
+#include <array>
+#include <set>
 #include <string>
 
 #include "assets/shape3d.h"
@@ -9,6 +12,56 @@
 #include "world/shape_mesh.h"
 
 using namespace s3d;
+
+// Primitive type 12 is the original's dedicated wheel (`_primtype_wheel`,
+// primtypetab[12] = 3): the six referenced vertices form two quads that share
+// the edge (v0,v3), and the software renderer fills whichever quad faces the
+// camera. A z-buffered renderer emits both quads instead of a single
+// six-vertex fan, which would be self-intersecting/degenerate.
+TEST(shape_mesh_wheel_primitive_emits_two_quads) {
+  Shape3D shape;
+  shape.vertices = {Vec3i{0, 0, 0}, Vec3i{0, 1, 0}, Vec3i{0, 0, 1},
+                    Vec3i{1, 0, 0}, Vec3i{1, 1, 0}, Vec3i{1, 0, 1}};
+  ShapePrimitive prim;
+  prim.type = 12;
+  prim.kind = PrimKind::Polygon;
+  prim.paint = {1};
+  prim.indices = {0, 1, 2, 3, 4, 5};
+  shape.primitives.push_back(prim);
+
+  MeshBuilder mb;
+  world::append_shape(mb, shape, glm::mat4(1.0f),
+                      [](uint8_t) -> glm::vec4 { return glm::vec4(1.0f); });
+
+  // Two quads -> two triangles each -> 12 vertices / 12 indices.
+  EXPECT_EQ(mb.vertex_count(), static_cast<size_t>(12));
+  EXPECT_EQ(mb.indices().size(), static_cast<size_t>(12));
+
+  const std::vector<Vertex>& verts = mb.vertices();
+  const auto src_index = [&](const glm::vec3& p) -> int {
+    for (size_t i = 0; i < shape.vertices.size(); ++i) {
+      const Vec3i& s = shape.vertices[i];
+      if (p == glm::vec3(s.x, s.y, s.z)) return static_cast<int>(i);
+    }
+    return -1;
+  };
+  std::set<std::array<int, 3>> tris;
+  for (size_t t = 0; t + 2 < verts.size(); t += 3) {
+    std::array<int, 3> tri = {src_index(verts[t].position),
+                              src_index(verts[t + 1].position),
+                              src_index(verts[t + 2].position)};
+    std::sort(tri.begin(), tri.end());
+    tris.insert(tri);
+  }
+  // Quad [0,1,2,3] then quad [3,4,5,0].
+  EXPECT_EQ(tris.count(std::array<int, 3>{0, 1, 2}), static_cast<size_t>(1));
+  EXPECT_EQ(tris.count(std::array<int, 3>{0, 2, 3}), static_cast<size_t>(1));
+  EXPECT_EQ(tris.count(std::array<int, 3>{3, 4, 5}), static_cast<size_t>(1));
+  EXPECT_EQ(tris.count(std::array<int, 3>{0, 3, 5}), static_cast<size_t>(1));
+  // The old six-vertex fan would have produced these instead.
+  EXPECT_EQ(tris.count(std::array<int, 3>{0, 3, 4}), static_cast<size_t>(0));
+  EXPECT_EQ(tris.count(std::array<int, 3>{0, 4, 5}), static_cast<size_t>(0));
+}
 
 TEST(shape_mesh_appends_road_geometry) {
   const std::string dir = find_asset_dir();
