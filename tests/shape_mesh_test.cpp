@@ -138,6 +138,53 @@ TEST(shape_mesh_appends_road_geometry) {
   EXPECT_TRUE(in_range);
 }
 
+// An element's own markings (the yellow line painted down a road) are authored
+// coincident with the road surface, so a z-buffered renderer z-fights them and
+// the line flickers as the camera moves. append_shape recognises a marking as a
+// small polygon lying on a much larger one of the same shape and routes it to
+// `decal_out`, so only the surface is left in `mb`.
+TEST(shape_mesh_routes_road_markings_to_decal_buffer) {
+  const std::string dir = find_asset_dir();
+  if (dir.empty()) {
+    std::printf("  (skipped: no Stunts asset dir found)\n");
+    return;
+  }
+  ShapeLibrary lib;
+  EXPECT_TRUE(lib.load_p3s(path_join(dir, "GAME1.P3S")));
+  const Shape3D* road = lib.find("road");
+  EXPECT_TRUE(road != nullptr);
+  if (road == nullptr) return;
+
+  // Encode the resolved paint byte into the colour so the two groups are
+  // observable: the road surface is paint 19, its dashes are paint 21.
+  auto paint_color = [](uint8_t paint) -> glm::vec4 {
+    return glm::vec4(static_cast<float>(paint), 0.0f, 0.0f, 1.0f);
+  };
+  const glm::mat4 model = world::shape_model(glm::vec3(0.0f), 0.0f);
+
+  MeshBuilder surface;
+  MeshBuilder decal;
+  world::append_shape(surface, *road, model, paint_color, 0, nullptr, &decal);
+
+  EXPECT_TRUE(surface.vertex_count() > 0);
+  EXPECT_TRUE(decal.vertex_count() > 0);
+  bool surface_is_dashes = false;
+  for (const Vertex& v : surface.vertices()) {
+    if (v.color.r > 20.0f) surface_is_dashes = true;
+  }
+  EXPECT_TRUE(!surface_is_dashes);  // no paint-21 dash left in the surface
+  bool decal_is_surface = false;
+  for (const Vertex& v : decal.vertices()) {
+    if (v.color.r < 20.0f) decal_is_surface = true;
+  }
+  EXPECT_TRUE(!decal_is_surface);  // no paint-19 surface in the decal buffer
+
+  // Splitting the shape must not drop or duplicate any geometry.
+  MeshBuilder whole;
+  world::append_shape(whole, *road, model, paint_color, 0);
+  EXPECT_EQ(surface.vertex_count() + decal.vertex_count(), whole.vertex_count());
+}
+
 // A multi-paint shape (the windmill has 4 paint slots) must select the colour
 // of the requested material slot. The animation cycles this slot 0..3.
 TEST(shape_mesh_material_slot_selects_paint) {

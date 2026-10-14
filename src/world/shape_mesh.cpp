@@ -79,6 +79,68 @@ void append_polygon(MeshBuilder& mb, const std::vector<glm::vec3>& pts,
   }
 }
 
+// A polygon's plane, size and extent, used to recognise the flat markings an
+// element paints on top of one of its own (coincident) surfaces.
+struct PolyInfo {
+  glm::vec3 normal{0.0f, 1.0f, 0.0f};  // unit
+  float area = 0.0f;
+  float plane_d = 0.0f;  // dot(normal, first vertex)
+  glm::vec3 centroid{0.0f};
+  glm::vec3 bb_min{0.0f};
+  glm::vec3 bb_max{0.0f};
+};
+
+// Fills `out` from a planar polygon (Newell's method gives both the area and a
+// consistent normal). Returns false for a degenerate (zero-area) polygon.
+bool polygon_info(const std::vector<glm::vec3>& pts, PolyInfo* out) {
+  if (pts.size() < 3) return false;
+  glm::vec3 n(0.0f);
+  for (size_t i = 0; i < pts.size(); ++i) {
+    n += glm::cross(pts[i], pts[(i + 1) % pts.size()]);
+  }
+  const float len = glm::length(n);
+  if (len < 1e-6f) return false;
+  out->normal = n / len;
+  out->area = 0.5f * len;
+  out->plane_d = glm::dot(out->normal, pts[0]);
+  out->centroid = glm::vec3(0.0f);
+  out->bb_min = out->bb_max = pts[0];
+  for (const glm::vec3& p : pts) {
+    out->centroid += p;
+    out->bb_min = glm::min(out->bb_min, p);
+    out->bb_max = glm::max(out->bb_max, p);
+  }
+  out->centroid /= static_cast<float>(pts.size());
+  return true;
+}
+
+// A polygon counts as a marking painted on a surface when a much larger polygon
+// of the same shape -- one at least this many times its area -- lies under it...
+constexpr float kDecalHostAreaRatio = 4.0f;
+// ...with the marking's centre inside that surface's bounds and on its plane to
+// within this many world units (one grid square is 1024). The authored markings
+// are coincident with their surface, and on a curved piece (a banked turn) they
+// straddle several of its flat panels, so the tolerance has to allow for that.
+constexpr float kDecalPlaneTolerance = 16.0f;
+
+// True when `poly` lies on one of the other polygons in `polys`.
+bool lies_on_surface(const PolyInfo& poly, const std::vector<PolyInfo>& polys,
+                     const std::vector<char>& measured, size_t self) {
+  for (size_t i = 0; i < polys.size(); ++i) {
+    if (i == self || !measured[i]) continue;
+    const PolyInfo& host = polys[i];
+    if (host.area < kDecalHostAreaRatio * poly.area) continue;
+    if (std::abs(glm::dot(host.normal, poly.centroid) - host.plane_d) > kDecalPlaneTolerance) {
+      continue;
+    }
+    if (poly.centroid.x < host.bb_min.x || poly.centroid.x > host.bb_max.x) continue;
+    if (poly.centroid.y < host.bb_min.y || poly.centroid.y > host.bb_max.y) continue;
+    if (poly.centroid.z < host.bb_min.z || poly.centroid.z > host.bb_max.z) continue;
+    return true;
+  }
+  return false;
+}
+
 }  // namespace
 
 void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
@@ -87,14 +149,41 @@ void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
 }
 
 void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
-                  const PaintColorFn& color_for, int material, MeshBuilder* line_out) {
+                  const PaintColorFn& color_for, int material, MeshBuilder* line_out,
+                  MeshBuilder* decal_out) {
   // Pre-transform all vertices once.
   std::vector<glm::vec3> pts(shape.vertices.size());
   for (size_t i = 0; i < shape.vertices.size(); ++i) {
     pts[i] = transform_point(model, shape.vertices[i]);
   }
 
-  for (const auto& prim : shape.primitives) {
+  // Decal routing only makes sense when the caller gave a distinct buffer.
+  const bool route_decals = decal_out != nullptr && decal_out != &mb;
+
+  // Classify each polygon once: small polygons lying on a larger one of the same
+  // shape are the markings an element paints over its own surface. (The originals
+  // draw them after the surface, so the marking wins; a z-buffer z-fights them.)
+  std::vector<PolyInfo> info(shape.primitives.size());
+  std::vector<char> measured(shape.primitives.size(), 0);
+  std::vector<char> decal(shape.primitives.size(), 0);
+  if (route_decals) {
+    for (size_t i = 0; i < shape.primitives.size(); ++i) {
+      const ShapePrimitive& prim = shape.primitives[i];
+      if (prim.kind != PrimKind::Polygon || prim.type == 12 || prim.indices.size() < 3) continue;
+      std::vector<glm::vec3> poly;
+      poly.reserve(prim.indices.size());
+      for (uint8_t idx : prim.indices) {
+        if (idx < pts.size()) poly.push_back(pts[idx]);
+      }
+      if (polygon_info(poly, &info[i])) measured[i] = 1;
+    }
+    for (size_t i = 0; i < shape.primitives.size(); ++i) {
+      if (measured[i] && lies_on_surface(info[i], info, measured, i)) decal[i] = 1;
+    }
+  }
+
+  for (size_t prim_index = 0; prim_index < shape.primitives.size(); ++prim_index) {
+    const ShapePrimitive& prim = shape.primitives[prim_index];
     // Select this primitive's paint byte for the requested material slot. The
     // original clamps an out-of-range material to slot 0.
     int slot = material;
@@ -228,7 +317,11 @@ void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
     for (uint8_t idx : prim.indices) {
       if (idx < pts.size()) poly.push_back(pts[idx]);
     }
-    append_polygon(mb, poly, color);
+    // A marking painted on one of the shape's own surfaces goes to the decal
+    // layer, which the caller draws with a forward depth bias so it wins the
+    // depth test against the surface, as it does in the original.
+    MeshBuilder& target = (route_decals && decal[prim_index]) ? *decal_out : mb;
+    append_polygon(target, poly, color);
   }
 }
 

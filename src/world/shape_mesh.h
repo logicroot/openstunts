@@ -44,9 +44,17 @@ void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
 // When `line_out` is non-null, primitives of kind Line are appended to it as
 // vertex pairs suitable for GL_LINES (used by the flashing diner sign). When it
 // is null, lines are skipped as before.
+//
+// When `decal_out` is non-null, small polygons that lie on top of a larger
+// polygon of the same shape (the road markings painted over a road surface) are
+// appended to it instead of `mb`. The originals draw such coincident polygons in
+// shape order, so the marking wins; a z-buffered renderer instead z-fights them
+// because their depths differ only by float error. Routing the markings to a
+// separate buffer lets the caller draw them with a forward depth bias (see
+// TrackMeshLayers::decal), which reproduces the original's outcome.
 void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
                   const PaintColorFn& color_for, int material = 0,
-                  MeshBuilder* line_out = nullptr);
+                  MeshBuilder* line_out = nullptr, MeshBuilder* decal_out = nullptr);
 
 // Convenience: builds an identity-transform model that translates to (tx, ty, tz)
 // and rotates `yaw_deg` degrees about the world Y axis.

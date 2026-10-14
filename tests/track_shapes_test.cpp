@@ -1,9 +1,11 @@
 #include <string>
 
+#include "assets/palette.h"
 #include "assets/shape3d.h"
 #include "assets/trk.h"
 #include "core/paths.h"
 #include "tiny_test.h"
+#include "world/material.h"
 #include "world/mesh_builder.h"
 #include "world/track_shapes.h"
 
@@ -84,6 +86,62 @@ TEST(build_track_shape_geometry_uses_palette_colors) {
     if (v.color != expected) all_match = false;
   }
   EXPECT_TRUE(all_match);
+}
+
+// A road's markings are authored coincident with the road surface, so through a
+// depth buffer they z-fight and the line flickers as the camera moves. When the
+// caller supplies a `decal` layer, build_track_static_layers must move those
+// markings out of `surface`/`overlay` and into `decal` (which the renderer draws
+// with the strongest forward polygon offset).
+TEST(build_track_static_layers_routes_markings_to_decal) {
+  const std::string dir = find_asset_dir();
+  if (dir.empty()) return;
+  ShapeLibrary lib;
+  lib.load_p3s(path_join(dir, "GAME1.P3S"));
+  lib.load_p3s(path_join(dir, "GAME2.P3S"));
+  if (lib.shapes().empty()) return;
+  Palette pal;
+  if (!load_vga_palette(path_join(dir, "SDMAIN.PVS"), &pal)) {
+    std::printf("  (skipped: no palette)\n");
+    return;
+  }
+  Track track = Track::load(path_join(dir, "DEFAULT.TRK"));
+
+  MeshBuilder base, terrain, surface, overlay, decal;
+  TrackMeshLayers layers;
+  layers.base = &base;
+  layers.terrain = &terrain;
+  layers.surface = &surface;
+  layers.overlay = &overlay;
+  layers.decal = &decal;
+  build_track_static_layers(track, lib, layers, pal);
+
+  EXPECT_TRUE(decal.vertex_count() > 0);
+
+  // Paint 21 is the yellow road line; it must appear only in the decal layer.
+  const glm::vec4 road_line = material_color(21, pal);
+  bool surface_has_line = false;
+  bool overlay_has_line = false;
+  bool decal_has_line = false;
+  for (const Vertex& v : surface.vertices()) {
+    if (v.color == road_line) surface_has_line = true;
+  }
+  for (const Vertex& v : overlay.vertices()) {
+    if (v.color == road_line) overlay_has_line = true;
+  }
+  for (const Vertex& v : decal.vertices()) {
+    if (v.color == road_line) decal_has_line = true;
+  }
+  EXPECT_TRUE(decal_has_line);
+  EXPECT_TRUE(!surface_has_line);
+  EXPECT_TRUE(!overlay_has_line);
+
+  // Splitting into layers must not drop or duplicate any geometry.
+  MeshBuilder whole;
+  build_track_static_geometry(track, lib, whole, pal);
+  const size_t split = base.vertex_count() + terrain.vertex_count() + surface.vertex_count() +
+                       overlay.vertex_count() + decal.vertex_count();
+  EXPECT_EQ(split, whole.vertex_count());
 }
 
 // The phase table is byte_3C0C6 = {0,0,0,0,1,1,1,1,2,2,2,2,3,3,3,3}, repeated.

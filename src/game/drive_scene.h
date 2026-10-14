@@ -180,11 +180,16 @@ class DriveScene : public Scene {
   Mesh track_terrain_;
   Mesh track_element_;
   Mesh track_overlay_;
+  // Markings painted onto a surface (the yellow line on a road). They are
+  // coincident with the surface they lie on, so they get the strongest forward
+  // bias and are drawn last of the track layers.
+  Mesh track_decal_;
   // Animated objects (windmill sails, flashing sign, ...) prebuilt for each of
   // the 4 paint phases; the game frame selects one to draw. Same layering as the
-  // static track (elements plus their decals plus GL_LINES primitives).
+  // static track (elements, their decals, painted markings, GL_LINES primitives).
   Mesh animated_meshes_[world::kTrackAnimationPhases];
   Mesh animated_overlays_[world::kTrackAnimationPhases];
+  Mesh animated_decals_[world::kTrackAnimationPhases];
   Mesh animated_lines_[world::kTrackAnimationPhases];
   int game_frame_ = 0;  // advances with the 20 Hz physics ticks
 

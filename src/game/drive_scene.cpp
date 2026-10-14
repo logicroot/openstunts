@@ -54,6 +54,8 @@ constexpr float kAngleToRadians = 6.28318530718f / 1024.0f;
 constexpr float kTrackBaseOffset = 3.0f;     // ground / terrain base (lowest)
 constexpr float kTrackTerrainOffset = 2.0f;  // terrain relief
 constexpr float kTrackSurfaceOffset = 1.0f;  // placed elements
+constexpr float kTrackOverlayOffset = -1.0f;  // element decals / overlays
+constexpr float kTrackDecalOffset = -2.0f;    // markings painted on a surface
 
 // The default player car id (gameconfig.game_playercarid): the Countach. Its
 // performance data is CARCOUN.RES, its bodywork STCOUN.P3S and its cockpit
@@ -314,16 +316,18 @@ bool DriveScene::on_enter() {
     world::TrackShapeStats stats;
     if (have_palette) {
       world::TrackMeshLayers layers;
-      MeshBuilder base, terrain, surface, overlay;
+      MeshBuilder base, terrain, surface, overlay, decal;
       layers.base = &base;
       layers.terrain = &terrain;
       layers.surface = &surface;
       layers.overlay = &overlay;
+      layers.decal = &decal;
       world::build_track_static_layers(track_, lib, layers, palette_, &stats);
       track_base_ = base.to_mesh();
       track_terrain_ = terrain.to_mesh();
       track_element_ = surface.to_mesh();
       track_overlay_ = overlay.to_mesh();
+      track_decal_ = decal.to_mesh();
     } else {
       MeshBuilder mb;
       world::build_track_static_geometry(track_, lib, mb, &stats);
@@ -340,10 +344,12 @@ bool DriveScene::on_enter() {
       MeshBuilder amb;
       MeshBuilder alb;
       MeshBuilder aob;
+      MeshBuilder adb;
       if (have_palette) {
         world::TrackMeshLayers alayers;
         alayers.surface = &amb;
         alayers.overlay = &aob;
+        alayers.decal = &adb;
         alayers.lines = &alb;
         world::build_track_animated_layers(track_, lib, alayers, palette_, phase,
                                            &anim_stats);
@@ -352,6 +358,7 @@ bool DriveScene::on_enter() {
       }
       animated_meshes_[phase] = amb.to_mesh();
       animated_overlays_[phase] = aob.to_mesh();
+      animated_decals_[phase] = adb.to_mesh();
       animated_lines_[phase] = alb.to_mesh();
     }
     S3D_INFO("drive track: %d animated objects (%d sign line verts)", anim_stats.animated,
@@ -1745,15 +1752,19 @@ void DriveScene::render(Renderer& renderer, int width, int height) {
   renderer.draw_world(track_terrain_, render_cam);
   renderer.set_polygon_offset(kTrackSurfaceOffset, kTrackSurfaceOffset);
   renderer.draw_world(track_element_, render_cam);
-  renderer.set_polygon_offset(-1.0f, -1.0f);  // Pull decals/overlays forward
+  renderer.set_polygon_offset(kTrackOverlayOffset, kTrackOverlayOffset);
   renderer.draw_world(track_overlay_, render_cam);
+  renderer.set_polygon_offset(kTrackDecalOffset, kTrackDecalOffset);
+  renderer.draw_world(track_decal_, render_cam);
 
   const int phase = world::track_animation_phase(game_frame_);
   renderer.set_polygon_offset(kTrackSurfaceOffset, kTrackSurfaceOffset);
   renderer.draw_world(animated_meshes_[phase], render_cam);
   renderer.draw_world_lines(animated_lines_[phase], render_cam);
-  renderer.set_polygon_offset(-1.0f, -1.0f);  // Pull animated overlays forward
+  renderer.set_polygon_offset(kTrackOverlayOffset, kTrackOverlayOffset);
   renderer.draw_world(animated_overlays_[phase], render_cam);
+  renderer.set_polygon_offset(kTrackDecalOffset, kTrackDecalOffset);
+  renderer.draw_world(animated_decals_[phase], render_cam);
 
   // The cars and debris are solid 3D objects, not layered decals, so clear the
   // track bias before drawing them (otherwise they inherit the overlay pull).

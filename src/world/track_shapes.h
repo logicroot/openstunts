@@ -82,17 +82,20 @@ void build_track_animated_geometry(const Track& track, const ShapeLibrary& lib,
 // ---- Layered output ---------------------------------------------------------
 // The track is a stack of flat, nearly coplanar layers: the ground/terrain base
 // at the bottom, then terrain relief, then placed elements (roads, bridges),
-// then the decals an element carries. Drawn through a depth buffer they
-// z-fight wherever the layers are within the depth resolution of each other,
-// which flickers when the camera moves. Splitting them into separate meshes
-// lets the renderer push each layer behind the next with glPolygonOffset so the
-// draw order is authoritative. A null pointer for a layer folds that layer's
-// geometry into `surface` (so a single-buffer call reproduces the old order).
+// then the decals an element carries, then the markings painted onto a surface.
+// Drawn through a depth buffer they z-fight wherever the layers are within the
+// depth resolution of each other, which flickers when the camera moves.
+// Splitting them into separate meshes lets the renderer push each layer behind
+// the next with glPolygonOffset so the draw order is authoritative. A null
+// pointer for base/terrain/overlay folds that layer's geometry into `surface`
+// (so a single-buffer call reproduces the old order).
 struct TrackMeshLayers {
   MeshBuilder* base = nullptr;     // ground quads and terrain bases (lowest)
   MeshBuilder* terrain = nullptr;  // terrain relief shapes
   MeshBuilder* surface = nullptr;  // placed elements (roads, bridges, ...) [required]
   MeshBuilder* overlay = nullptr;  // element decals (drawn on top of surface)
+  MeshBuilder* decal = nullptr;    // markings painted on a surface (null: leave
+                                   // them with the surface they belong to)
   MeshBuilder* lines = nullptr;    // GL_LINES primitives (animated sign only)
 };
 
