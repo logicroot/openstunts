@@ -379,9 +379,9 @@ TEST(motion_track_collision_drives_real_track_without_sinking) {
   }
   EXPECT_TRUE(ground_ticks > 200);
   // Circling this track must sweep at least one wheel across a wall (integration
-  // check that step_car_motion reaches resolve_wall_contact). The latch is
-  // sticky, so it stays set once the wall response fires.
-  EXPECT_EQ(car.car_collision_latch, kCarCollisionLatchSet);
+  // check that step_car_motion reaches resolve_wall_contact). A wall hit must
+  // not touch field_C8: that latch belongs to the car-vs-car contact only.
+  EXPECT_EQ(car.car_collision_latch, kCarCollisionLatchClear);
   // At least one of those wall hits is hard enough to enter the crash state.
   EXPECT_EQ(car.car_crashBmpFlag, kCrashEventCollision);
 }

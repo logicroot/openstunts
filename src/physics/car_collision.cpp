@@ -57,22 +57,24 @@ bool corner_inside(const fixed::Vec3& corner, const CollisionFrame& frame,
 
 }  // namespace
 
-CollisionFrame make_collision_frame(const CarState& car, bool is_player) {
+CollisionPoints collision_points_from_spec(const CarSpec& spec) {
+  CollisionPoints points;
+  points.w[0] = spec.collide_points[0].x;
+  points.w[1] = spec.collide_points[0].y;
+  points.w[2] = spec.collide_points[1].x;
+  points.w[3] = spec.collide_points[1].y;
+  return points;
+}
+
+CollisionFrame make_collision_frame(const CarState& car) {
   CollisionFrame f;
   f.pos[0] = static_cast<int16_t>(car.car_position.x >> 6);
   f.pos[1] = static_cast<int16_t>(car.car_position.y >> 6);
   f.pos[2] = static_cast<int16_t>(car.car_position.z >> 6);
-  if (is_player) {
-    // stateply.c: (-rotate.z, -rotate.x, -rotate.y).
-    f.rot[0] = static_cast<int16_t>(-car.car_rotate.z);
-    f.rot[1] = static_cast<int16_t>(-car.car_rotate.x);
-    f.rot[2] = static_cast<int16_t>(-car.car_rotate.y);
-  } else {
-    // stateply.c: (rotate.z, rotate.y, rotate.x).
-    f.rot[0] = car.car_rotate.z;
-    f.rot[1] = car.car_rotate.y;
-    f.rot[2] = car.car_rotate.x;
-  }
+  // stateply.c: (car_rotate.z, car_rotate.y, car_rotate.x), for either car.
+  f.rot[0] = car.car_rotate.z;
+  f.rot[1] = car.car_rotate.y;
+  f.rot[2] = car.car_rotate.x;
   return f;
 }
 
@@ -168,6 +170,36 @@ bool car_car_speed_adjust(CarState* self, CarState* other) {
   self->car_rev_speed = self->car_actual_speed;     // car_speed  = car_speed2
   other->car_rev_speed = other->car_actual_speed;
   return rel > 0x1E;
+}
+
+bool car_car_resolve(CarState* self, const CollisionPoints& self_points,
+                     CarState* other, const CollisionPoints& other_points) {
+  const CollisionFrame self_frame = make_collision_frame(*self);
+  const CollisionFrame other_frame = make_collision_frame(*other);
+
+  if (!car_car_collide(self_points, self_frame, other_points, other_frame)) {
+    // loc_16840: a clear tick drops the contact latch.
+    self->car_collision_latch = kCarCollisionLatchClear;
+    return false;
+  }
+
+  // loc_164B2: an overlap. `field_C8` gates processing to the first tick of a
+  // contact, so the opponent's pass does not re-apply what the player's did.
+  if (self->car_collision_latch != kCarCollisionLatchClear) {
+    return true;  // loc_16892: leave the latch set.
+  }
+
+  if (car_car_speed_adjust(self, other)) {
+    // loc_16550: update_crash_state(1, MplayerFlag) and (1, MplayerFlag ^ 1).
+    // update_crash_state keeps an existing crash state.
+    if (self->car_crashBmpFlag == kCrashEventNone) {
+      self->car_crashBmpFlag = kCrashEventCollision;
+    }
+    if (other->car_crashBmpFlag == kCrashEventNone) {
+      other->car_crashBmpFlag = kCrashEventCollision;
+    }
+  }
+  return true;
 }
 
 }  // namespace s3d::physics

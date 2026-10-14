@@ -4,6 +4,7 @@
 
 #include <cstdint>
 
+#include "assets/car.h"
 #include "physics/car_collision.h"
 #include "physics/car_state.h"
 #include "tiny_test.h"
@@ -26,8 +27,8 @@ CollisionFrame frame_at(int16_t x, int16_t y, int16_t z) {
   return f;
 }
 
-// A frame whose third rotation word is `yaw`, matching the opponent-style
-// layout (rot[2] = car_rotate.x). Used to show rotation is applied.
+// A frame whose third rotation word is `yaw`, matching make_collision_frame
+// (rot[2] = car_rotate.x). Used to show rotation is applied.
 CollisionFrame yaw_frame(int16_t x, int16_t y, int16_t z, int16_t yaw) {
   CollisionFrame f = frame_at(x, y, z);
   f.rot[2] = yaw;
@@ -75,7 +76,7 @@ TEST(car_collide_rotation_flips_result) {
   EXPECT_TRUE(!car_car_collide(kCoun, a, kCoun, turned));
 }
 
-TEST(car_frame_player_vs_opponent_rotation) {
+TEST(car_frame_matches_stateply_layout) {
   CarState car;
   car.car_position.x = 6400;  // >>6 => 100
   car.car_position.y = 320;   // >>6 => 5
@@ -84,18 +85,86 @@ TEST(car_frame_player_vs_opponent_rotation) {
   car.car_rotate.y = 0x22;
   car.car_rotate.x = 0x33;
 
-  const CollisionFrame p = make_collision_frame(car, true);
-  EXPECT_EQ(p.pos[0], 100);
-  EXPECT_EQ(p.pos[1], 5);
-  EXPECT_EQ(p.pos[2], -2);
-  EXPECT_EQ(p.rot[0], static_cast<int16_t>(-0x11));
-  EXPECT_EQ(p.rot[1], static_cast<int16_t>(-0x33));
-  EXPECT_EQ(p.rot[2], static_cast<int16_t>(-0x22));
+  const CollisionFrame f = make_collision_frame(car);
+  EXPECT_EQ(f.pos[0], 100);
+  EXPECT_EQ(f.pos[1], 5);
+  EXPECT_EQ(f.pos[2], -2);
+  // rot = (car_rotate.z, car_rotate.y, car_rotate.x) for either car.
+  EXPECT_EQ(f.rot[0], 0x11);
+  EXPECT_EQ(f.rot[1], 0x22);
+  EXPECT_EQ(f.rot[2], 0x33);
+}
 
-  const CollisionFrame o = make_collision_frame(car, false);
-  EXPECT_EQ(o.rot[0], 0x11);
-  EXPECT_EQ(o.rot[1], 0x22);
-  EXPECT_EQ(o.rot[2], 0x33);
+TEST(collision_points_from_spec_reads_first_four_words) {
+  s3d::CarSpec spec;
+  spec.collide_points[0] = s3d::Point2D{20, 17};
+  spec.collide_points[1] = s3d::Point2D{54, 61};
+  const CollisionPoints p = collision_points_from_spec(spec);
+  EXPECT_EQ(p.w[0], 20);
+  EXPECT_EQ(p.w[1], 17);
+  EXPECT_EQ(p.w[2], 54);
+  EXPECT_EQ(p.w[3], 61);
+}
+
+TEST(car_resolve_applies_soft_contact_once) {
+  // Identical overlapping cars at the same heading/speed: the contact is soft
+  // (relative speed clamped to 0xA) so neither crashes. Only the ticked car
+  // loses speed, and the latch stops a second pass from double-applying it.
+  CarState a, b;
+  a.car_position.x = 6400;  // >>6 => 100
+  b.car_position.x = 6400;
+  a.car_actual_speed = 0x1000;
+  b.car_actual_speed = 0x1000;
+
+  EXPECT_TRUE(car_car_resolve(&a, kCoun, &b, kCoun));
+  EXPECT_EQ(a.car_actual_speed, 0x880);   // (0x300 * 0xA) >> 2 = 0x780
+  EXPECT_EQ(b.car_actual_speed, 0x1000);
+  EXPECT_EQ(a.car_collision_latch, kCarCollisionLatchSet);
+  EXPECT_EQ(b.car_collision_latch, kCarCollisionLatchSet);
+
+  // Still touching: the latch is set, so nothing changes.
+  EXPECT_TRUE(car_car_resolve(&a, kCoun, &b, kCoun));
+  EXPECT_EQ(a.car_actual_speed, 0x880);
+
+  // Separated: the latch clears (loc_16840).
+  b.car_position.x = 6400 + 6000;
+  EXPECT_TRUE(!car_car_resolve(&a, kCoun, &b, kCoun));
+  EXPECT_EQ(a.car_collision_latch, kCarCollisionLatchClear);
+}
+
+TEST(car_resolve_head_on_crashes_both) {
+  // Opposite headings at 0x1000: relative magnitude 32 > 0x1E, so both cars
+  // enter the collision crash state (update_crash_state(1, MplayerFlag) and
+  // (1, MplayerFlag ^ 1)).
+  CarState a, b;
+  a.car_position.x = 6400;
+  b.car_position.x = 6400;
+  a.car_rotate.x = 0;
+  b.car_rotate.x = 0x200;
+  a.car_actual_speed = 0x1000;
+  b.car_actual_speed = 0x1000;
+
+  EXPECT_TRUE(car_car_resolve(&a, kCoun, &b, kCoun));
+  EXPECT_EQ(a.car_crashBmpFlag, kCrashEventCollision);
+  EXPECT_EQ(b.car_crashBmpFlag, kCrashEventCollision);
+  EXPECT_EQ(a.car_actual_speed, 0);
+}
+
+TEST(car_resolve_keeps_an_existing_crash_state) {
+  // update_crash_state does nothing when a car is already crashed, so a water
+  // crash is not overwritten by the car-vs-car collision.
+  CarState a, b;
+  a.car_position.x = 6400;
+  b.car_position.x = 6400;
+  a.car_rotate.x = 0;
+  b.car_rotate.x = 0x200;
+  a.car_actual_speed = 0x1000;
+  b.car_actual_speed = 0x1000;
+  b.car_crashBmpFlag = kCrashEventWater;
+
+  EXPECT_TRUE(car_car_resolve(&a, kCoun, &b, kCoun));
+  EXPECT_EQ(a.car_crashBmpFlag, kCrashEventCollision);
+  EXPECT_EQ(b.car_crashBmpFlag, kCrashEventWater);  // unchanged
 }
 
 TEST(car_speed_adjust_soft_contact) {

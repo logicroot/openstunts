@@ -350,9 +350,9 @@ var_e_select:  // loc_14B72
   update_grip(opp, opp_spec, nullptr, kGripBehaviorOpponent);
   step_car_motion(opp, opp_spec, frames_per_sec, ground, collision);
 
-  // loc_16840: the end of update_player_state clears the car-vs-car latch.
-  // (The player-side collision wiring lives in the drive scene.)
-  opp->car_collision_latch = kCarCollisionLatchClear;
+  // The loc_16840 latch clear and the car-vs-car collision live in the drive
+  // scene (car_car_resolve), which runs this module's pass and then the
+  // opponent's pass, matching the original's player_op -> opponent_op order.
 
   // loc_14C49: the checkpoint heading error, skipped while crashed.
   if (opp->car_crashBmpFlag != kCrashEventNone) goto off_track_crash;

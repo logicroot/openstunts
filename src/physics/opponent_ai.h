@@ -22,7 +22,8 @@
 //
 // The car-vs-car collision is intentionally NOT part of this module: the
 // original runs it inside each car's update_player_state, and the integration
-// (drive scene) wires it on the player side with matching latch semantics.
+// (drive scene) applies it with car_car_resolve() for the player's and the
+// opponent's pass, preserving the per-contact latch.
 
 #include <cstdint>
 #include <vector>

@@ -398,8 +398,6 @@ void step_car_motion(CarState* car, const CarSpec& spec, int frames_per_sec,
                                work_pitch, work_roll);
       if (!contact.hit) continue;
 
-      car->car_collision_latch = kCarCollisionLatchSet;
-
       // Blend every wheel: pull it back along its travel by the blocked fraction
       // and add the wall deflection (stateply.c loc_155A1..loc_1553F).
       for (int w = 0; w < kCarWheelCount; ++w) {

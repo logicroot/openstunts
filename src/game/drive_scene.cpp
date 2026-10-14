@@ -299,6 +299,7 @@ bool DriveScene::on_enter() {
 
   // ---- Player car ----------------------------------------------------------
   spec_ = load_or_default_spec(asset_dir_, car_id_);
+  player_collision_points_ = physics::collision_points_from_spec(spec_);
 
   have_palette_ = have_palette;
   car_lib_ = std::make_shared<ShapeLibrary>();
@@ -324,6 +325,7 @@ bool DriveScene::on_enter() {
       S3D_WARN("%s not found; no opponent", opp_pre.c_str());
     } else {
       opponent_spec_ = load_or_default_spec(asset_dir_, opponent_car_id_);
+      opponent_collision_points_ = physics::collision_points_from_spec(opponent_spec_);
       opponent_lib_ = std::make_shared<ShapeLibrary>();
       if (world::load_car_archive(asset_dir_, opponent_car_id_, opponent_lib_.get())) {
         opponent_wheel_pose_ = world::CarWheelPose{};
@@ -824,6 +826,16 @@ void DriveScene::physics_tick(const Controls& controls) {
   const auto sampler = [this](float wx, float wz) { return ground_sample(track_, wx, wz); };
   physics::step_car_motion(&car_, spec_, physics::kGameFrameRateNormal, sampler, &collision_);
 
+  // Car-vs-car collision (update_player_state loc_164B2..loc_16550): the player's
+  // box against the opponent's. The player runs first, so it tests the
+  // opponent's pose from before this frame's AI tick; the opponent's own pass
+  // (below) then tests the player's updated pose, matching player_op ->
+  // opponent_op. Without an opponent there is nothing to collide with.
+  if (have_opponent_) {
+    physics::car_car_resolve(&car_, player_collision_points_, &opponent_,
+                             opponent_collision_points_);
+  }
+
   // Crash debris (state_op_unk): a hard enough wall hit throws off a burst of
   // the car's own "exp" shards. The original spawns them from
   // update_crash_state (player_op) on the frame car_crashBmpFlag becomes 1 and
@@ -873,6 +885,13 @@ void DriveScene::physics_tick(const Controls& controls) {
     opponent_field_45e_ = physics::run_opponent_ai(
         opponent_setup(), &opponent_ai_, &opponent_, car_, opponent_spec_,
         physics::kGameFrameRateNormal, sampler, &collision_);
+
+    // The opponent's collision pass (update_player_state loc_164B2..loc_16550
+    // with MplayerFlag = 1): the opponent's box against the player's updated
+    // pose. The player's pass has already set the contact latch, so this only
+    // acts on the frame a contact begins on the opponent's side.
+    physics::car_car_resolve(&opponent_, opponent_collision_points_, &car_,
+                             player_collision_points_);
 
     // Opponent crash debris (state_op_unk, reached from opponent_op's
     // update_crash_state): the same burst the player throws, only the shards

@@ -18,6 +18,7 @@
 #include "core/kevin_random.h"
 #include "game/race_state.h"
 #include "game/scene.h"
+#include "physics/car_collision.h"
 #include "physics/car_debris.h"
 #include "physics/car_state.h"
 #include "physics/opponent_ai.h"
@@ -189,6 +190,10 @@ class DriveScene : public Scene {
   CarSpec opponent_spec_;
   physics::CarState opponent_;
   physics::CarState opponent_prev_;
+  // Both cars' collide_points boxes (physics::collision_points_from_spec), used
+  // by the car-vs-car test in physics_tick.
+  physics::CollisionPoints player_collision_points_;
+  physics::CollisionPoints opponent_collision_points_;
   physics::OpponentAiState opponent_ai_;
   // state.field_45E: the last run_opponent_ai return (0 none, 1 first-edge
   // side, 2 second-edge side), driving the HUD opponent-near indicator.
