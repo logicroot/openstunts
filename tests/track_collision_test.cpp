@@ -417,6 +417,127 @@ TEST(track_collision_build_object_corkscrew_ud_wall_and_plane) {
   EXPECT_EQ(s.surface_type, static_cast<int8_t>(CarSurfaceType::Paved));
 }
 
+TEST(track_collision_build_object_tunnel_bore_and_wall) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  Track t = empty_track();
+  set_item(&t, 3, 4, 66);  // item 66: tunnel, rot 0, physical model 28
+  tc.set_track(&t);
+
+  const int cx = 3 * 1024 + 512;
+  const int cz = 4 * 1024 + 512;
+  CollisionSample s;
+  // At ceiling height the wheel rides the flat bore plane 0x85.
+  tc.build_track_object(word_pos(cx, 0x90, cz), word_pos(cx, 0x90, cz), &s);
+  EXPECT_EQ(s.physical_model, 28);
+  EXPECT_EQ(s.plane_index, 0x85 * 4);
+  EXPECT_EQ(s.wall_index, -1);
+  EXPECT_EQ(s.surface_type, static_cast<int8_t>(CarSurfaceType::Paved));
+
+  // Near ground with the wheel inside the right x band and the next position
+  // beyond the far z edge: the near wall 0x9A.
+  tc.build_track_object(word_pos(cx + 0x100, 0, cz),
+                        word_pos(cx + 0x100, 0, cz - 0x200), &s);
+  EXPECT_EQ(s.wall_index, 0x9A);
+  EXPECT_EQ(s.wall_height, 0x90);
+}
+
+TEST(track_collision_build_object_pipe_entrance_plane_and_wall) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  Track t = empty_track();
+  set_item(&t, 3, 4, 70);  // item 70: pipe entrance, rot 0, physical model 29
+  tc.set_track(&t);
+
+  const int cx = 3 * 1024 + 512;
+  const int cz = 4 * 1024 + 512;
+  CollisionSample s;
+  // Near the centre the entrance selects its opening plane 0x46.
+  tc.build_track_object(word_pos(cx + 0x10, 0, cz), word_pos(cx + 0x10, 0, cz), &s);
+  EXPECT_EQ(s.physical_model, 29);
+  EXPECT_EQ(s.plane_index, 0x46 * 4);
+  EXPECT_EQ(s.wall_index, -1);
+  EXPECT_EQ(s.surface_type, static_cast<int8_t>(CarSurfaceType::Paved));
+
+  // The leading lip is a wall (0x9F on the positive-x side).
+  tc.build_track_object(word_pos(cx + 0x20, 0, cz),
+                        word_pos(cx + 0x80, 0, cz), &s);
+  EXPECT_EQ(s.wall_index, 0x9F);
+  EXPECT_EQ(s.wall_height, 0x97);
+}
+
+TEST(track_collision_build_object_pipe_and_half_pipe) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+
+  const int cx = 3 * 1024 + 512;
+  const int cz = 4 * 1024 + 512;
+  CollisionSample s;
+
+  Track tp = empty_track();
+  set_item(&tp, 3, 4, 68);  // item 68: pipe, rot 0, physical model 30
+  tc.set_track(&tp);
+  // Straight through the pipe: the low left plane 0x39.
+  tc.build_track_object(word_pos(cx + 0x10, 0, cz + 0x10),
+                        word_pos(cx + 0x10, 0, cz + 0x10), &s);
+  EXPECT_EQ(s.physical_model, 30);
+  EXPECT_EQ(s.plane_index, 0x39 * 4);
+  EXPECT_EQ(s.surface_type, static_cast<int8_t>(CarSurfaceType::Paved));
+
+  // A wheel moving past the pipe mouth hits the entry wall 0x9B.
+  tc.build_track_object(word_pos(cx + 0x10, 0, cz),
+                        word_pos(cx + 0xA4, 0, cz), &s);
+  EXPECT_EQ(s.wall_index, 0x9B);
+  EXPECT_EQ(s.wall_height, 0x97);
+
+  Track th = empty_track();
+  set_item(&th, 3, 4, 83);  // item 83: half pipe, rot 0, physical model 31
+  tc.set_track(&th);
+  // Inside the half-pipe channel: pavement plane 0x45, no side wall.
+  tc.build_track_object(word_pos(cx + 0x10, 0, cz + 0x10),
+                        word_pos(cx + 0x10, 0, cz + 0x10), &s);
+  EXPECT_EQ(s.physical_model, 31);
+  EXPECT_EQ(s.plane_index, 0x45 * 4);
+  EXPECT_EQ(s.wall_index, -1);
+  EXPECT_EQ(s.surface_type, static_cast<int8_t>(CarSurfaceType::Paved));
+}
+
+TEST(track_collision_build_object_loop_surface_and_base) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  Track t = empty_track();
+  set_item(&t, 3, 4, 64);  // item 64: loop, rot 0, physical model 27
+  tc.set_track(&t);
+
+  // multi_tile 1 -> z centre is row*1024, x centre is col*1024 + 512.
+  const int cx = 3 * 1024 + 512;
+  const int cz = 4 * 1024;
+  CollisionSample s;
+  // On the loop's inner face the interpolated x band picks riding plane 0x2E.
+  tc.build_track_object(word_pos(cx - 0x180, 0, cz + 0x100),
+                        word_pos(cx - 0x180, 0, cz + 0x100), &s);
+  EXPECT_EQ(s.physical_model, 27);
+  EXPECT_EQ(s.plane_index, 0x2E * 4);
+  EXPECT_EQ(s.surface_type, static_cast<int8_t>(CarSurfaceType::Paved));
+
+  // Right at the loop centre the wheel sits on the flat loop base pavement.
+  tc.build_track_object(word_pos(cx, 0, cz), word_pos(cx, 0, cz), &s);
+  EXPECT_EQ(s.plane_index, 0);
+  EXPECT_EQ(s.surface_type, static_cast<int8_t>(CarSurfaceType::Paved));
+}
+
 // ---------------------------------------------------------------------------
 // Real track sanity check
 // ---------------------------------------------------------------------------

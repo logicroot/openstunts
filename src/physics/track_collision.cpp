@@ -130,6 +130,18 @@ constexpr int16_t kCorkLrNegZBound[12] = {
 constexpr int16_t kCorkLrPosZBound[12] = {
     0, 1024, 931, 838, 745, 652, 559, 466, 373, 280, 187, 94};
 
+// Loop surface / base bounds (dseg.asm loopSurface_* / loopBase_*).  The
+// original stores each "lower" and "upper" array as one shared block, so the
+// upper array is the same data shifted by one entry; keep one array each and
+// index [i] / [i + 1].
+constexpr int16_t kLoopSurfZ[7] = {0, 224, 389, 449, 389, 224, 0};
+constexpr int16_t kLoopSurfX[14] = {-400, -400, -352, -304, -270, -235, -200,
+                                    0,    135,  299,  524,  749,  914,  975};
+constexpr int16_t kLoopMaxZ = 449;
+constexpr int16_t kLoopBaseZ[7] = {0, 178, 360, 536, 704, 868, 2000};
+constexpr int16_t kLoopBaseInnX[7] = {0, -20, -40, -60, -80, -100, -120};
+constexpr int16_t kLoopBaseOutX[7] = {400, 361, 320, 276, 226, 174, 120};
+
 }  // namespace
 
 TrackCollision::TrackCollision() = default;
@@ -652,6 +664,222 @@ void TrackCollision::build_track_object_from_track(const s3d::Track& track,
           wall_orient_mod = kOrient180;
           wallindex = wallsel + 0x7B;
         }
+        break;
+      }
+      // ---- Loop (code_bto_loop / code_bto_loopBase) ----------------------
+      case PHYS_LOOP: {
+        auto lerp = [](int v, int z0, int z1, int b0, int b1) -> int {
+          if (z1 == z0) return b0;
+          return (v - z0) * (b1 - b0) / (z1 - z0) + b0;
+        };
+        // loopBase is entered directly by the loop handler; it only reports
+        // whether the wheel sits on the base pavement.
+        auto loop_base = [&](int z2e, int x6e) -> bool {
+          int si = 0;
+          while (si < 5 && kLoopBaseZ[si + 1] < z2e) ++si;
+          const int inner = lerp(z2e, kLoopBaseZ[si], kLoopBaseZ[si + 1],
+                                 kLoopBaseInnX[si], kLoopBaseInnX[si + 1]);
+          const int outer = lerp(z2e, kLoopBaseZ[si], kLoopBaseZ[si + 1],
+                                 kLoopBaseOutX[si], kLoopBaseOutX[si + 1]);
+          return x6e >= inner && x6e <= outer;
+        };
+
+        const bool neg = vz < 0;
+        const int16_t x6e = neg ? wrap_negate(vx) : vx;
+        const int16_t z2e = neg ? wrap_negate(vz) : vz;
+        if (z2e > kLoopMaxZ + 0x64) {
+          if (loop_base(z2e, x6e)) set_pavement();
+          break;
+        }
+        const int16_t m1e =
+            z2e <= kLoopMaxZ - 1 ? z2e : static_cast<int16_t>(kLoopMaxZ - 1);
+        int si = 0;
+        while (si < 5 && kLoopSurfZ[si + 1] < m1e) ++si;
+        const int lower_plan = (neg ? 0x33 : 0x2D) + si;
+
+        const int height = static_cast<int>(world_pos.y) - terrain_height;
+        if (height > 0x20C) {
+          // Upper half: the band index is mirrored before the x test.
+          si = 5 - si;
+          bool blank = false;
+          bool found = false;
+          if (kLoopSurfX[si] > x6e) {
+            blank = true;
+          } else if (kLoopSurfX[si + 1] + 0x190 < x6e) {
+            blank = true;
+          } else if (kLoopSurfX[si + 1] < x6e) {
+            found = kLoopSurfX[si] + 0x190 > x6e;
+          }
+          if (!blank && !found) {
+            const int m3c = lerp(m1e, kLoopSurfZ[si], kLoopSurfZ[si + 1],
+                                 kLoopSurfX[si], kLoopSurfX[si + 1]);
+            found = m3c < x6e && m3c + 0x190 > x6e;
+          }
+          if (found) {
+            planindex = (neg ? 0x33 : 0x2D) + si;
+            set_pavement();
+          }
+        } else {
+          if (si > 1 && height < 0x64) {
+            if (loop_base(z2e, x6e)) set_pavement();
+            break;
+          }
+          bool base = false;
+          bool found = false;
+          if (kLoopSurfX[si] > x6e) {
+            base = true;
+          } else if (kLoopSurfX[si + 1] + 0x190 < x6e) {
+            base = true;
+          } else if (kLoopSurfX[si + 1] < x6e) {
+            found = kLoopSurfX[si] + 0x190 > x6e;
+          }
+          if (!base && !found) {
+            if (kLoopSurfX[si + 1] == kLoopSurfX[si]) {
+              base = true;
+            } else {
+              const int m3c = lerp(m1e, kLoopSurfZ[si], kLoopSurfZ[si + 1],
+                                   kLoopSurfX[si], kLoopSurfX[si + 1]);
+              if (m3c >= x6e || m3c + 0x190 <= x6e) {
+                base = true;
+              } else {
+                found = true;
+              }
+            }
+          }
+          if (found) {
+            planindex = lower_plan;
+            set_pavement();
+          } else if (base && loop_base(z2e, x6e)) {
+            set_pavement();
+          }
+        }
+        break;
+      }
+      // ---- Tunnel (code_bto_tunnel) --------------------------------------
+      case PHYS_TUNNEL: {
+        const int height = static_cast<int>(world_pos.y) - terrain_height;
+        const int next_height = static_cast<int>(next_world_pos.y) - terrain_height;
+        if (height >= 0x90 || next_height >= 0x90) {
+          // Inside the bore: a flat road, unless the wheel leaves laterally.
+          if (abs_x >= 0x10E) break;
+          set_pavement();
+          planindex = 0x85;
+          break;
+        }
+        if (abs_x < 0x78) set_pavement();
+        if (vx >= 0x78 && vx <= 0x10E) {
+          wall_height = 0x90;
+          if (nvz <= static_cast<int16_t>(0xFE00)) {
+            wallindex = 0x9A;
+          } else if (nvz >= 0x200) {
+            wallindex = 0x99;
+          } else if (nvx <= 0x78) {
+            wallindex = 0x98;
+          } else if (nvx >= 0x10E) {
+            wallindex = 0x96;
+          }
+          break;
+        }
+        if (vx > static_cast<int16_t>(0xFF88)) break;
+        if (vx < static_cast<int16_t>(0xFEF2)) break;
+        wall_height = 0x90;
+        if (nvz <= static_cast<int16_t>(0xFE00)) {
+          wallindex = 0x9A;
+        } else if (nvz >= 0x200) {
+          wallindex = 0x99;
+        } else if (nvx <= static_cast<int16_t>(0xFF88)) {
+          wallindex = 0x97;
+        } else if (nvx <= static_cast<int16_t>(0xFEF2)) {
+          wallindex = 0x95;
+        }
+        break;
+      }
+      // ---- Pipe entrance (code_bto_pipeEntrance) --------------------------
+      case PHYS_PIPE_ENTRANCE: {
+        const int16_t abs_nvx = nvx < 0 ? wrap_negate(nvx) : nvx;
+        if (abs_nvx >= 0x73 && abs_x <= 0xA4) {
+          wall_height = 0x97;
+          wallindex = nvx > 0 ? 0x9F : 0xA0;
+          break;
+        }
+        if (abs_x >= 0x73) break;
+        const int height = static_cast<int>(world_pos.y) - terrain_height;
+        if (height >= 0xAB) break;
+        set_pavement();
+        if (abs_x < 0x1F) {
+          planindex = 0x46;
+          break;
+        }
+        int16_t m1e;
+        int si;
+        if (vx < static_cast<int16_t>(0xFFAC)) {
+          planindex = 0x49;
+          m1e = static_cast<int16_t>(0xFF9C);
+          si = -5;
+        } else if (vx < 0) {
+          planindex = 0x47;
+          m1e = static_cast<int16_t>(0xFFC7);
+          si = -8;
+        } else if (vx > 0x54) {
+          planindex = 0x4D;
+          m1e = 0x64;
+          si = 5;
+        } else {
+          planindex = 0x4B;
+          m1e = 0x39;
+          si = 8;
+        }
+        const int proj =
+            fixed::multiply_and_scale(fixed::sin_fast(static_cast<uint16_t>(si)), vz) +
+            fixed::multiply_and_scale(fixed::cos_fast(static_cast<uint16_t>(si)),
+                                      wrap_sub(vx, m1e));
+        if (s16_wrap(proj) < 0) ++planindex;
+        break;
+      }
+      // ---- Pipe / half pipe (code_bto_halfPipe / code_bto_pipe) ----------
+      case PHYS_HALF_PIPE:
+      case PHYS_PIPE: {
+        const int16_t abs_nvx = nvx < 0 ? wrap_negate(nvx) : nvx;
+        if (abs_nvx >= 0xA4 && abs_x <= 0xA4) {
+          wall_height = 0x97;
+          wallindex = nvx > 0 ? 0x9B : 0x9C;
+          break;
+        }
+        if (abs_x >= 0xA4) break;
+        const int height = static_cast<int>(world_pos.y) - terrain_height;
+        if (height >= 0x109) break;
+        if (abs_x < 0x82) set_pavement();
+        const bool high = height > 0x97;
+        if (phys == PHYS_HALF_PIPE && !high && abs_x <= 0x54 && abs_z <= 0x4B) {
+          planindex = 0x45;
+          if (nvz <= static_cast<int16_t>(0xFFB5)) {
+            wallindex = 0x9D;
+          } else if (nvz >= 0x4B) {
+            wallindex = 0x9E;
+          }
+          break;
+        }
+        if (height > 0x58 && !high) {
+          planindex = vx < 0 ? 0x3C : 0x42;
+          break;
+        }
+        if (abs_x < 0x1F) {
+          planindex = high ? 0x3F : 0x39;
+          break;
+        }
+        if (vx < static_cast<int16_t>(0xFFAC)) {
+          planindex = high ? 0x3D : 0x3B;
+          break;
+        }
+        if (vx < 0) {
+          planindex = high ? 0x3E : 0x3A;
+          break;
+        }
+        if (vx > 0x54) {
+          planindex = high ? 0x41 : 0x43;
+          break;
+        }
+        planindex = high ? 0x40 : 0x44;
         break;
       }
       // ---- Corkscrew left/right (code_bto_corkLr) ------------------------
