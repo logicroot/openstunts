@@ -18,10 +18,11 @@ using namespace s3d;
 
 // Primitive type 12 is the original's dedicated wheel (`_primtype_wheel`,
 // primtypetab[12] = 3), authored as a six-vertex wedge that only covers the
-// upper part of the tyre. The port rebuilds it as a round low-poly cylinder
-// about the axle (kCarWheelSides facets plus two sidewall fans) so the tyres
-// read as round and stay opaque, instead of the flat triangle the raw data
-// describes.
+// upper part of the wheel. The port rebuilds it as a round low-poly wheel
+// about the axle (kCarWheelSides facets plus hub discs) so the wheels read as
+// round and stay opaque, instead of the flat triangle the raw data describes.
+// The authored dark-grey material paints the tyre band and tread, and the hub
+// inside it is a lightened grey.
 TEST(shape_mesh_wheel_primitive_emits_round_tyre) {
   Shape3D shape;
   shape.vertices = {Vec3i{0, 0, 0}, Vec3i{0, 1, 0}, Vec3i{0, 0, 1},
@@ -35,28 +36,54 @@ TEST(shape_mesh_wheel_primitive_emits_round_tyre) {
 
   MeshBuilder mb;
   world::append_shape(mb, shape, glm::mat4(1.0f),
-                      [](uint8_t) -> glm::vec4 { return glm::vec4(1.0f); });
+                      [](uint8_t) -> glm::vec4 { return glm::vec4(0.2f, 0.2f, 0.2f, 1.0f); });
 
-  // kCarWheelSides side quads (two triangles each) plus two sidewall fans of
-  // (kCarWheelSides - 2) triangles.
-  const size_t tri_count = static_cast<size_t>(world::kCarWheelSides) * 2 +
-                           static_cast<size_t>(world::kCarWheelSides - 2) * 2;
+  // Two hub fans of (kCarWheelSides - 2) triangles, two tyre sidewall bands of
+  // kCarWheelSides quads (two triangles each) and a kCarWheelSides-quad tread.
+  const size_t sides = static_cast<size_t>(world::kCarWheelSides);
+  const size_t tri_count =
+      (sides - 2) * 2 + sides * 2 * 2 + sides * 2;
   EXPECT_EQ(mb.vertex_count(), tri_count * 3);
   EXPECT_EQ(mb.indices().size(), tri_count * 3);
 
-  // The axle is the X axis: inner sidewall at x=0, outer at x=1. The smallest
+  // The axle is the X axis: inner face at x=0, outer at x=1. The smallest
   // circle enclosing the authored rim points (0,0), (1,0), (0,1) is centred at
-  // (0.5, 0.5) with radius sqrt(0.5), so every emitted vertex sits on that
-  // cylinder.
+  // (0.5, 0.5) with radius sqrt(0.5), so every emitted vertex sits on either
+  // the tyre cylinder or the smaller hub cylinder inside it.
   const float radius = std::sqrt(0.5f);
+  const float rim_radius = radius * world::kCarWheelRimRatio;
+  bool saw_tyre = false;
+  bool saw_rim = false;
+  bool off_cylinder = false;
   const std::vector<Vertex>& verts = mb.vertices();
   for (const Vertex& v : verts) {
     EXPECT_TRUE(std::abs(v.position.x - 0.0f) < 1e-3f ||
                 std::abs(v.position.x - 1.0f) < 1e-3f);
     const float dy = v.position.y - 0.5f;
     const float dz = v.position.z - 0.5f;
-    EXPECT_TRUE(std::abs(std::sqrt(dy * dy + dz * dz) - radius) < 1e-3f);
+    const float r = std::sqrt(dy * dy + dz * dz);
+    if (std::abs(r - radius) < 1e-3f) {
+      saw_tyre = true;
+    } else if (std::abs(r - rim_radius) < 1e-3f) {
+      saw_rim = true;
+    } else {
+      off_cylinder = true;
+    }
   }
+  EXPECT_TRUE(saw_tyre);
+  EXPECT_TRUE(saw_rim);
+  EXPECT_TRUE(!off_cylinder);
+
+  // The tyre (authored dark grey) and the rim (a lightened grey) must be
+  // distinct, so the wheel reads as a grey hub inside a dark tyre.
+  bool saw_dark = false;
+  bool saw_light = false;
+  for (const Vertex& v : verts) {
+    if (v.color.r < 0.3f) saw_dark = true;
+    if (v.color.r > 0.4f) saw_light = true;
+  }
+  EXPECT_TRUE(saw_dark);
+  EXPECT_TRUE(saw_light);
 
   // The tyre is closed: every edge is shared by exactly two triangles (the
   // vertices are unindexed, so merge coincident ones first).

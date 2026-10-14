@@ -19,6 +19,11 @@ namespace s3d::world {
 // cars are drawn at, while keeping the vertex count small.
 inline constexpr int kCarWheelSides = 12;
 
+// Fraction of the tyre radius occupied by the hub/rim. The wheel is rebuilt as
+// a grey hub disc inside a dark-grey tyre band/tread, so this sets how thick
+// the tyre looks (0.65 -> the tyre is the outer 35% of the radius).
+inline constexpr float kCarWheelRimRatio = 0.65f;
+
 // Color chosen per primitive paint index (one entry per material). Returning a
 // color with alpha 0 skips the primitive.
 using PaintColorFn = std::function<glm::vec4(uint8_t)>;

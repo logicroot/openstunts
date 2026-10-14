@@ -17,7 +17,7 @@ struct Config {
   // Deliberate deviation from the original wheel data: the authored wheels are
   // small blocks that read as "missing tyres" at modern resolutions, so each
   // wheel is scaled about its own centre by this factor. 1.0 = original size.
-  float wheel_scale = 1.5f;
+  float wheel_scale = 1.25f;
   bool show_fps = true;
   std::string asset_dir;
   std::string last_track = "DEFAULT.TRK";

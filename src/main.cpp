@@ -22,6 +22,7 @@ int main(int argc, char** argv) {
   std::string screenshot_path;
   int screenshot_frame = 0;
   int camera_mode = 0;
+  float wheel_scale_arg = 0.0f;
   bool top_down = false;
   bool drive = false;
 
@@ -40,6 +41,8 @@ int main(int argc, char** argv) {
       screenshot_frame = std::atoi(argv[++i]);
     } else if (a == "--camera" && i + 1 < argc) {
       camera_mode = std::atoi(argv[++i]);
+    } else if (a == "--wheel-scale" && i + 1 < argc) {
+      wheel_scale_arg = static_cast<float>(std::atof(argv[++i]));
     } else if (a == "--drive") {
       drive = true;
     } else if (a == "--top") {
@@ -49,7 +52,7 @@ int main(int argc, char** argv) {
           "Stunts3D — 3D reimplementation of Stunts\n"
           "usage: stunts3d [--assets DIR] [--track FILE.trk] [--config FILE]\n"
           "                [--car ID] [--opp-car ID] [--opp N] [--screenshot out.png]\n"
-          "                [--frames N] [--camera N] [--top] [--drive]\n");
+          "                [--frames N] [--camera N] [--wheel-scale F] [--top] [--drive]\n");
       return 0;
     } else {
       S3D_WARN("unknown argument: %s", a.c_str());
@@ -61,6 +64,7 @@ int main(int argc, char** argv) {
   if (!car_arg.empty()) config.player_car = car_arg;
   if (!opp_car_arg.empty()) config.opponent_car = opp_car_arg;
   if (opp_type_arg > 0) config.opponent_type = opp_type_arg;
+  if (wheel_scale_arg > 0.0f) config.wheel_scale = wheel_scale_arg;
 
   const std::string asset_dir = find_asset_dir(config.asset_dir);
   const std::string track_name = !track_arg.empty() ? track_arg : config.last_track;

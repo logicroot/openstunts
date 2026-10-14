@@ -125,12 +125,17 @@ void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
     // primtypetab[12] = 3). It is authored as a six-vertex wedge: three
     // vertices on the tyre's inner face (ix[0..2]) and three on its outer face
     // (ix[3..5]), describing only the upper part of the wheel, so faithfully
-    // drawn it reads as a flat triangle. Reconstruct the round tyre the data
+    // drawn it reads as a flat triangle. Reconstruct the round wheel the data
     // implies instead: a low-poly cylinder about the axle whose radius is the
     // smallest circle enclosing the authored rim points. (A deliberate
-    // deviation, agreed with the user so the tyres read as tyres.) The closed
-    // cylinder also keeps the tyre opaque, which the original's two
+    // deviation, agreed with the user so the wheels read as wheels.) The closed
+    // cylinder also keeps the wheel opaque, which the original's two
     // camera-facing quads could not do in a z-buffered renderer.
+    //
+    // The authored material colour (palette 29, rgb(56,56,56) for every car) is
+    // a dark grey, which the user reads as the tyre. So the outer band and
+    // tread keep that colour, and the hub inside it is lightened into a grey
+    // rim -- giving grey wheels wrapped in dark-grey tyres, as the user asked.
     if (prim.type == 12 && prim.indices.size() >= 6) {
       const std::vector<uint8_t>& ix = prim.indices;
       bool in_range = true;
@@ -161,23 +166,40 @@ void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
           const Circle2 circle = minimal_enclosing_circle(flat);
           if (circle.radius > 1e-3f) {
             const glm::vec3 centre = inner + circle.center.x * u + circle.center.y * v;
-            std::vector<glm::vec3> ring_in, ring_out;
-            ring_in.reserve(kCarWheelSides);
-            ring_out.reserve(kCarWheelSides);
-            for (int s = 0; s < kCarWheelSides; ++s) {
-              const float angle =
-                  6.28318530718f * static_cast<float>(s) / static_cast<float>(kCarWheelSides);
-              const glm::vec3 rad =
-                  circle.radius * (std::cos(angle) * u + std::sin(angle) * v);
-              ring_in.push_back(centre + rad);
-              ring_out.push_back(centre + axle + rad);
-            }
-            append_polygon(mb, ring_out, color);  // outer sidewall
-            const std::vector<glm::vec3> ring_in_rev(ring_in.rbegin(), ring_in.rend());
-            append_polygon(mb, ring_in_rev, color);  // inner sidewall
+            // Two-tone wheel: the rim/hub is a lightened version of the tyre
+            // (material) colour, so a wheel is a grey hub disc inside a
+            // dark-grey tyre band and tread.
+            const glm::vec4 tyre_color = color;
+            const glm::vec3 rgb = glm::vec3(tyre_color);
+            const glm::vec4 rim_color(
+                glm::min(rgb * 2.4f + 0.10f, glm::vec3(1.0f)), tyre_color.a);
+            std::vector<glm::vec3> tyre_in, tyre_out, rim_in, rim_out;
+            const auto build_ring = [&](float radius, std::vector<glm::vec3>& in,
+                                        std::vector<glm::vec3>& out) {
+              in.reserve(kCarWheelSides);
+              out.reserve(kCarWheelSides);
+              for (int s = 0; s < kCarWheelSides; ++s) {
+                const float angle =
+                    6.28318530718f * static_cast<float>(s) / static_cast<float>(kCarWheelSides);
+                const glm::vec3 rad = radius * (std::cos(angle) * u + std::sin(angle) * v);
+                in.push_back(centre + rad);
+                out.push_back(centre + axle + rad);
+              }
+            };
+            build_ring(circle.radius, tyre_in, tyre_out);
+            build_ring(circle.radius * kCarWheelRimRatio, rim_in, rim_out);
+
+            // Grey hub discs capping either side of the rim.
+            append_polygon(mb, rim_out, rim_color);  // outer hub
+            const std::vector<glm::vec3> rim_in_rev(rim_in.rbegin(), rim_in.rend());
+            append_polygon(mb, rim_in_rev, rim_color);  // inner hub
             for (int s = 0; s < kCarWheelSides; ++s) {
               const int t = (s + 1) % kCarWheelSides;
-              append_polygon(mb, {ring_in[s], ring_out[s], ring_out[t], ring_in[t]}, color);
+              // Dark-grey tyre: the sidewall bands around the hub...
+              append_polygon(mb, {rim_out[s], tyre_out[s], tyre_out[t], rim_out[t]}, tyre_color);
+              append_polygon(mb, {rim_in[s], tyre_in[s], tyre_in[t], rim_in[t]}, tyre_color);
+              // ...and the tread between the two faces.
+              append_polygon(mb, {tyre_in[s], tyre_out[s], tyre_out[t], tyre_in[t]}, tyre_color);
             }
             continue;
           }
