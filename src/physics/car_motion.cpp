@@ -343,26 +343,26 @@ void step_car_motion(CarState* car, const CarSpec& spec, int frames_per_sec,
         wheel_heading = wrap_sub(car->car_velocity_heading_offset, front_heading_offset);
       }
       fixed::Vec3 world_travel;
-      if (use_track_collision) {
-        // Resolve the plane under the wheel before it moves, then travel along
-        // it (math.c transform_wheel_travel_to_world / plane_rotate_op).
-        const fixed::Vec3 pre_word{static_cast<int16_t>(current[i].x >> kWorldToLongShift),
-                                   static_cast<int16_t>(current[i].y >> kWorldToLongShift),
-                                   static_cast<int16_t>(current[i].z >> kWorldToLongShift)};
-        CollisionSample sample;
-        collision->build_track_object_from_track(*collision->track(), pre_word, pre_word, &sample);
+      // The reference builds each wheel's travel from the car's *own*
+      // orientation: update_player_state pins planindex_copy to 0xFFFF just
+      // before the wheel loop (seg001.asm loc_14F7C), so the plane_rotate_op
+      // call at loc_14FA6 always takes its no-plane branch:
+      //   world_travel = car_to_world * R_y(-heading) * (0, 0, travel)
+      // The element plane under the wheel is only consulted afterwards, for the
+      // contact distance/wall response. Projecting the travel onto that plane
+      // instead strips the upward component while the car is still pitched up
+      // off a ramp lip -- the "climbs the ramp but never flies" bug (the travel
+      // gets clamped into the ground plane). Keep the car-frame travel.
+      if (collision != nullptr) {
         collision->transform_wheel_travel_to_world(travel, wheel_heading, car_to_world, work_yaw,
-                                                   work_pitch, work_roll, sample.plane_index,
-                                                   &world_travel);
+                                                   work_pitch, work_roll, -1, &world_travel);
       } else {
-        // Flat-ground fallback (no-plane branch of transform_wheel_travel_to_world):
-        //   world_travel = car_to_world * R_y(-heading) * (0, 0, travel).
         fixed::Mat3 heading_rotation;
         fixed::mat_rot_y(wrap_negate(wheel_heading), &heading_rotation);
         const fixed::Vec3 forward{0, 0, travel};
-        fixed::Vec3 plane_direction;
-        fixed::mat_mul_vector(forward, heading_rotation, &plane_direction);
-        fixed::mat_mul_vector(plane_direction, car_to_world, &world_travel);
+        fixed::Vec3 heading_dir;
+        fixed::mat_mul_vector(forward, heading_rotation, &heading_dir);
+        fixed::mat_mul_vector(heading_dir, car_to_world, &world_travel);
       }
       current[i].x = wrap_add32(current[i].x, world_travel.x);
       current[i].y = wrap_add32(current[i].y, world_travel.y);

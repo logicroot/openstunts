@@ -108,6 +108,8 @@ struct JumpResult {
   int crash_frame = -1;
   int max_y = 0;
   int max_front_minus_rear = -0x4000;  // pitch evidence while on the slope
+  int airborne_frames = 0;             // ticks with all four wheels off the ground
+  int first_airborne_pitch = -0x4000;  // nose attitude on the first such tick
 };
 
 // Runs one fixed-speed approach and reports what happened. 20 Hz physics,
@@ -130,6 +132,10 @@ JumpResult drive_ramp(uint16_t speed, int frames) {
     const int front = car.car_wheel_contact_positions[0].y;
     const int rear = car.car_wheel_contact_positions[2].y;
     if (front - rear > r.max_front_minus_rear) r.max_front_minus_rear = front - rear;
+    if (car.car_sumSurfAllWheels == 0) {
+      if (r.airborne_frames == 0) r.first_airborne_pitch = car.car_rotate.y;
+      ++r.airborne_frames;
+    }
     if (car.car_crashBmpFlag != 0) {
       r.crash_frame = f;
       break;
@@ -169,4 +175,25 @@ TEST(ramp_jump_fast_does_not_crash) {
     // It should climb the slope / launch rather than stall at the base.
     EXPECT_TRUE(r.max_y > 5000);
   }
+}
+
+// The car must actually fly off the ramp: in the reference the wheel travel is
+// built from the car's own orientation (seg001.asm loc_14F7C pins
+// planindex_copy to 0xFFFF, so plane_rotate_op takes its no-plane branch), not
+// projected onto the ground plane under the wheel. Projecting it clamps the
+// upward component at the lip, so the car leaves nose-down ("sticks to the
+// ground") instead of nose-up. Pin the takeoff attitude.
+TEST(ramp_jump_launches_nose_up) {
+  Track track;
+  TrackCollision tc;
+  if (!build_scene(&track, &tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  const JumpResult r = drive_ramp(12000, 600);
+  EXPECT_EQ(r.crash_frame, -1);
+  EXPECT_TRUE(r.airborne_frames > 0);
+  // On the first fully-airborne tick the nose is still up (it was climbing the
+  // slope), not snapped down into the ground plane.
+  EXPECT_TRUE(r.first_airborne_pitch > 0);
 }
