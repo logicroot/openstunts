@@ -18,6 +18,12 @@ class Renderer {
   void draw_world(const Mesh& mesh, const Camera& camera,
                   const glm::mat4& model = glm::mat4(1.0f));
 
+  // Biases the depth of subsequently drawn polygons (glPolygonOffset). Used to
+  // push layered, nearly coplanar track surfaces (ground base, terrain relief,
+  // elements, decals) behind one another so their draw order is authoritative
+  // and they do not z-fight as the camera moves. (0, 0) disables the bias.
+  void set_polygon_offset(float factor, float units);
+
   // Draws a mesh built as vertex pairs with GL_LINES (used for the flashing
   // diner sign). Same lighting/colour shader as draw_world.
   void draw_world_lines(const Mesh& mesh, const Camera& camera,

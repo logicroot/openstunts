@@ -13,7 +13,13 @@ class Camera {
   glm::vec3 position{0.0f};
   float yaw_deg = -90.0f;   // rotation around Y, -90 looks down -Z
   float pitch_deg = 0.0f;   // rotation around X
-  float fov_deg = 65.0f;
+  // Horizontal field of view in degrees. The original engine builds its
+  // projection from a horizontal half-angle (set_projection(0x28, 0x28, 320,
+  // 200) in the racing view, i.e. an 80 degree horizontal FOV), so the port
+  // stores the *horizontal* FOV and derives the vertical one from the window
+  // aspect in projection(). This keeps the car the same size on screen
+  // regardless of how wide the window is.
+  float fov_deg = 80.0f;
   float znear = 8.0f;
   float zfar = 200000.0f;
 
@@ -46,7 +52,11 @@ class Camera {
   }
 
   glm::mat4 projection(float aspect) const {
-    return glm::perspective(glm::radians(fov_deg), aspect, znear, zfar);
+    // fov_deg is the horizontal FOV; GL's perspective() wants the vertical one.
+    // tan(v/2) = tan(h/2) / aspect.
+    const float a = (aspect > 0.0f) ? aspect : 1.0f;
+    const float vfov = 2.0f * std::atan(std::tan(glm::radians(fov_deg) * 0.5f) / a);
+    return glm::perspective(vfov, aspect, znear, zfar);
   }
 
   void move(const glm::vec3& delta) { position += delta; }

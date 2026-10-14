@@ -42,12 +42,19 @@ class DriveScene : public Scene {
   // `opponent_car_id` (gameconfig.game_opponentcarid) selects the opponent car;
   // when empty the race runs without an opponent. `opponent_type` is the
   // opponent driving style (1..6) and picks the OPPn.PRE sped table.
+  // `fov_deg` is the horizontal FOV (the original's racing value is 80) and
+  // `wheel_scale` is the tyre-enlargement factor (Config::wheel_scale).
   DriveScene(Track track, std::string asset_dir, std::string car_id = "COUN",
-             std::string opponent_car_id = "", int opponent_type = 1);
+             std::string opponent_car_id = "", int opponent_type = 1,
+             float fov_deg = 80.0f, float wheel_scale = 1.0f);
 
   bool on_enter() override;
   void update(double dt, const Controls& controls) override;
   void render(Renderer& renderer, int width, int height) override;
+
+  // Select the camera mode (0 = cockpit, 1-3 = chase/varied), the same modes
+  // the original's 'C' key cycles. Exposed so screenshots can pick a view.
+  void set_camera_mode(int mode) { camera_mode_ = mode; }
 
   // Render `frames` frames, then write a PNG and quit (CI/verification).
   void request_screenshot(std::string path, int frames);
@@ -165,10 +172,19 @@ class DriveScene : public Scene {
   Palette palette_;                    // VGA colours for track materials
   bool have_palette_ = false;
 
-  Mesh track_mesh_;  // static terrain + non-animated elements
+  // Static track geometry split into depth layers (lowest first): the flat
+  // ground/terrain base, terrain relief, placed elements and element decals.
+  // Drawn with a per-layer polygon offset (see Renderer::set_polygon_offset) so
+  // the nearly coplanar layers do not z-fight as the camera moves.
+  Mesh track_base_;
+  Mesh track_terrain_;
+  Mesh track_element_;
+  Mesh track_overlay_;
   // Animated objects (windmill sails, flashing sign, ...) prebuilt for each of
-  // the 4 paint phases; the game frame selects one to draw.
+  // the 4 paint phases; the game frame selects one to draw. Same layering as the
+  // static track (elements plus their decals plus GL_LINES primitives).
   Mesh animated_meshes_[world::kTrackAnimationPhases];
+  Mesh animated_overlays_[world::kTrackAnimationPhases];
   Mesh animated_lines_[world::kTrackAnimationPhases];
   int game_frame_ = 0;  // advances with the 20 Hz physics ticks
 
@@ -240,6 +256,9 @@ class DriveScene : public Scene {
   bool opponent_bounds_valid_ = false;
   Camera camera_;
   Camera camera_prev_;  // camera pose at the previous physics tick
+  // Tyre-enlargement factor applied when building the car meshes
+  // (Config::wheel_scale); 1.0 keeps the authored wheels.
+  float wheel_scale_ = 1.0f;
 
   // Race loop: start/finish line, 20 Hz clock and the finish state.
   game::StartFinish start_finish_;

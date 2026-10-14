@@ -122,14 +122,27 @@ constexpr glm::vec4 kFallbackGroundColor(0.33f, 0.55f, 0.26f, 1.0f);
 
 // Shared builder. `include_static` selects terrain and non-animated elements;
 // `include_animated` selects objects with surface == 0xFF, painted with
-// `anim_phase`. `lines` (optional) receives line primitives for GL_LINES.
+// `anim_phase`. `lines` (optional) receives line primitives for GL_LINES. The
+// `layers` split routes each stack level to its own builder (see
+// TrackMeshLayers); null layer pointers fold into `layers.surface`.
 void build_track_shape_geometry_impl(const Track& track, const ShapeLibrary& lib,
-                                     MeshBuilder& mb, const PaintColorFn& paint_color,
+                                     const TrackMeshLayers& layers,
+                                     const PaintColorFn& paint_color,
                                      const glm::vec4& ground_color, int anim_phase,
                                      bool include_static, bool include_animated,
-                                     MeshBuilder* lines, TrackShapeStats* stats) {
+                                     TrackShapeStats* stats) {
   TrackShapeStats local;
   if (stats != nullptr) *stats = local;
+
+  // Fold a null layer pointer into the required surface buffer.
+  auto layer = [&layers](MeshBuilder* b) -> MeshBuilder& {
+    return b != nullptr ? *b : *layers.surface;
+  };
+  MeshBuilder& base = layer(layers.base);
+  MeshBuilder& terrain_mb = layer(layers.terrain);
+  MeshBuilder& surface = *layers.surface;
+  MeshBuilder& overlay = layer(layers.overlay);
+  MeshBuilder* lines = layers.lines;
 
   const TerrainShape* terrains = terrain_shapes();
 
@@ -141,7 +154,7 @@ void build_track_shape_geometry_impl(const Track& track, const ShapeLibrary& lib
         const float cx = static_cast<float>(x) * kTileSize + kHalf;
         const float cz = static_cast<float>(y) * kTileSize + kHalf;
         if (t == 0) {
-          add_ground_quad(mb, cx, cz, ground_color);
+          add_ground_quad(base, cx, cz, ground_color);
           ++local.ground_cells;
         } else if (t > 0 && t < kTerrainShapeCount) {
           const TerrainShape& ts = terrains[t];
@@ -153,9 +166,10 @@ void build_track_shape_geometry_impl(const Track& track, const ShapeLibrary& lib
           // original fills the remaining sea-level half with flat land, so draw
           // that base quad first. It sits 1 unit below the flat ground so it does
           // not z-fight with coplanar shape faces (water, ramps).
-          add_ground_quad(mb, cx, cz, ground_color, -1.0f);
+          add_ground_quad(base, cx, cz, ground_color, -1.0f);
           if (s != nullptr) {
-            append_shape(mb, *s, fixed_model({cx, height, cz}, ts.rot_y), paint_color);
+            append_shape(terrain_mb, *s, fixed_model({cx, height, cz}, ts.rot_y),
+                         paint_color);
             ++local.terrain_shapes;
           } else {
             ++local.missing_shapes;
@@ -193,7 +207,7 @@ void build_track_shape_geometry_impl(const Track& track, const ShapeLibrary& lib
 
       const Shape3D* s = lookup(lib, def.shape);
       if (s != nullptr) {
-        append_shape(mb, *s, fixed_model(pos, def.rot_y), paint_color, material, lines);
+        append_shape(surface, *s, fixed_model(pos, def.rot_y), paint_color, material, lines);
         if (animated) {
           ++local.animated;
         } else {
@@ -209,7 +223,7 @@ void build_track_shape_geometry_impl(const Track& track, const ShapeLibrary& lib
         if (overlay_shape(def.overlay, &oshape, &orot)) {
           const Shape3D* os = lookup(lib, oshape);
           if (os != nullptr) {
-            append_shape(mb, *os, fixed_model(pos, orot), paint_color, material, lines);
+            append_shape(overlay, *os, fixed_model(pos, orot), paint_color, material, lines);
             ++local.overlays;
           } else {
             ++local.missing_shapes;
@@ -228,6 +242,22 @@ int track_animation_phase(int game_frame) {
   return (game_frame >> 2) & (kTrackAnimationPhases - 1);
 }
 
+namespace {
+
+// A single out-buffer reproduces the historical draw order: every layer folds
+// into `out`.
+TrackMeshLayers single_buffer(MeshBuilder& out, MeshBuilder* lines = nullptr) {
+  TrackMeshLayers l;
+  l.base = &out;
+  l.terrain = &out;
+  l.surface = &out;
+  l.overlay = &out;
+  l.lines = lines;
+  return l;
+}
+
+}  // namespace
+
 Mesh build_track_shape_mesh(const Track& track, const ShapeLibrary& lib,
                             TrackShapeStats* stats) {
   MeshBuilder mb;
@@ -244,45 +274,80 @@ Mesh build_track_shape_mesh(const Track& track, const ShapeLibrary& lib,
 
 void build_track_shape_geometry(const Track& track, const ShapeLibrary& lib,
                                 MeshBuilder& mb, TrackShapeStats* stats) {
-  build_track_shape_geometry_impl(track, lib, mb, fallback_paint_color(),
-                                  kFallbackGroundColor, 0, true, true, nullptr, stats);
+  build_track_shape_geometry_impl(track, lib, single_buffer(mb), fallback_paint_color(),
+                                  kFallbackGroundColor, 0, true, true, stats);
 }
 
 void build_track_shape_geometry(const Track& track, const ShapeLibrary& lib,
                                 MeshBuilder& mb, const Palette& palette,
                                 TrackShapeStats* stats) {
   build_track_shape_geometry_impl(
-      track, lib, mb, [&palette](uint8_t paint) { return material_color_or_clear(paint, palette); },
-      material_color(16, palette), 0, true, true, nullptr, stats);
+      track, lib, single_buffer(mb),
+      [&palette](uint8_t paint) { return material_color_or_clear(paint, palette); },
+      material_color(16, palette), 0, true, true, stats);
 }
 
 void build_track_static_geometry(const Track& track, const ShapeLibrary& lib,
                                  MeshBuilder& mb, const Palette& palette,
                                  TrackShapeStats* stats) {
   build_track_shape_geometry_impl(
-      track, lib, mb, [&palette](uint8_t paint) { return material_color_or_clear(paint, palette); },
-      material_color(16, palette), 0, true, false, nullptr, stats);
+      track, lib, single_buffer(mb),
+      [&palette](uint8_t paint) { return material_color_or_clear(paint, palette); },
+      material_color(16, palette), 0, true, false, stats);
 }
 
 void build_track_static_geometry(const Track& track, const ShapeLibrary& lib,
                                  MeshBuilder& mb, TrackShapeStats* stats) {
-  build_track_shape_geometry_impl(track, lib, mb, fallback_paint_color(),
-                                  kFallbackGroundColor, 0, true, false, nullptr, stats);
+  build_track_shape_geometry_impl(track, lib, single_buffer(mb), fallback_paint_color(),
+                                  kFallbackGroundColor, 0, true, false, stats);
 }
 
 void build_track_animated_geometry(const Track& track, const ShapeLibrary& lib,
                                    MeshBuilder& mb, const Palette& palette, int phase,
                                    TrackShapeStats* stats, MeshBuilder* lines) {
   build_track_shape_geometry_impl(
-      track, lib, mb, [&palette](uint8_t paint) { return material_color_or_clear(paint, palette); },
-      material_color(16, palette), phase, false, true, lines, stats);
+      track, lib, single_buffer(mb, lines),
+      [&palette](uint8_t paint) { return material_color_or_clear(paint, palette); },
+      material_color(16, palette), phase, false, true, stats);
 }
 
 void build_track_animated_geometry(const Track& track, const ShapeLibrary& lib,
                                    MeshBuilder& mb, int phase, TrackShapeStats* stats,
                                    MeshBuilder* lines) {
-  build_track_shape_geometry_impl(track, lib, mb, fallback_paint_color(),
-                                  kFallbackGroundColor, phase, false, true, lines, stats);
+  build_track_shape_geometry_impl(track, lib, single_buffer(mb, lines),
+                                  fallback_paint_color(), kFallbackGroundColor, phase,
+                                  false, true, stats);
+}
+
+void build_track_static_layers(const Track& track, const ShapeLibrary& lib,
+                               const TrackMeshLayers& layers, const Palette& palette,
+                               TrackShapeStats* stats) {
+  build_track_shape_geometry_impl(
+      track, lib, layers,
+      [&palette](uint8_t paint) { return material_color_or_clear(paint, palette); },
+      material_color(16, palette), 0, true, false, stats);
+}
+
+void build_track_static_layers(const Track& track, const ShapeLibrary& lib,
+                               const TrackMeshLayers& layers, TrackShapeStats* stats) {
+  build_track_shape_geometry_impl(track, lib, layers, fallback_paint_color(),
+                                  kFallbackGroundColor, 0, true, false, stats);
+}
+
+void build_track_animated_layers(const Track& track, const ShapeLibrary& lib,
+                                 const TrackMeshLayers& layers, const Palette& palette,
+                                 int phase, TrackShapeStats* stats) {
+  build_track_shape_geometry_impl(
+      track, lib, layers,
+      [&palette](uint8_t paint) { return material_color_or_clear(paint, palette); },
+      material_color(16, palette), phase, false, true, stats);
+}
+
+void build_track_animated_layers(const Track& track, const ShapeLibrary& lib,
+                                 const TrackMeshLayers& layers, int phase,
+                                 TrackShapeStats* stats) {
+  build_track_shape_geometry_impl(track, lib, layers, fallback_paint_color(),
+                                  kFallbackGroundColor, phase, false, true, stats);
 }
 
 }  // namespace s3d::world

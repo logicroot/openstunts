@@ -63,6 +63,7 @@ Config Config::load(const std::string& path) {
     else if (key == "highdpi") c.highdpi = parse_bool(val);
     else if (key == "mouse_sensitivity") c.mouse_sensitivity = std::atof(val.c_str());
     else if (key == "fov_deg") c.fov_deg = static_cast<float>(std::atof(val.c_str()));
+    else if (key == "wheel_scale") c.wheel_scale = static_cast<float>(std::atof(val.c_str()));
     else if (key == "show_fps") c.show_fps = parse_bool(val);
     else if (key == "asset_dir") c.asset_dir = val;
     else if (key == "last_track") c.last_track = val;
@@ -102,6 +103,7 @@ bool Config::save(const std::string& path) const {
   out << "highdpi = " << (highdpi ? 1 : 0) << "\n";
   out << "mouse_sensitivity = " << mouse_sensitivity << "\n";
   out << "fov_deg = " << fov_deg << "\n";
+  out << "wheel_scale = " << wheel_scale << "\n";
   out << "show_fps = " << (show_fps ? 1 : 0) << "\n";
   out << "asset_dir = " << asset_dir << "\n";
   out << "last_track = " << last_track << "\n";

@@ -46,6 +46,15 @@ constexpr float kFollowVerticalStep = 30.0f;
 
 constexpr float kAngleToRadians = 6.28318530718f / 1024.0f;
 
+// Per-layer polygon offsets for the static track (values are glPolygonOffset's
+// factor and units; larger = pushed further from the camera). The layers are
+// nearly coplanar, so without a bias the depth differences fall below the depth
+// buffer's resolution at distance and the layers z-fight as the camera moves.
+// The offsets are tiny in world space but exceed that ambiguity band.
+constexpr float kTrackBaseOffset = 3.0f;     // ground / terrain base (lowest)
+constexpr float kTrackTerrainOffset = 2.0f;  // terrain relief
+constexpr float kTrackSurfaceOffset = 1.0f;  // placed elements
+
 // The default player car id (gameconfig.game_playercarid): the Countach. Its
 // performance data is CARCOUN.RES, its bodywork STCOUN.P3S and its cockpit
 // dashboard STDACOUN.PVS. Overridable with --car / the config's player_car.
@@ -263,12 +272,17 @@ bool project_box_rect(const glm::mat4& mvp, const glm::vec3& bmin, const glm::ve
 }  // namespace
 
 DriveScene::DriveScene(Track track, std::string asset_dir, std::string car_id,
-                       std::string opponent_car_id, int opponent_type)
+                       std::string opponent_car_id, int opponent_type, float fov_deg,
+                       float wheel_scale)
     : track_(std::move(track)),
       asset_dir_(std::move(asset_dir)),
       car_id_(std::move(car_id)),
       opponent_car_id_(std::move(opponent_car_id)),
       opponent_type_(std::clamp(opponent_type, 1, OpponentData::kOpponentCount)) {
+  // Horizontal FOV (the original's racing projection) and the tyre-enlargement
+  // factor; both come from the config.
+  camera_.fov_deg = fov_deg;
+  wheel_scale_ = wheel_scale;
   // The asset names are upper-case four-character ids (e.g. "COUN", "VETT").
   for (char& c : car_id_) {
     c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
@@ -294,18 +308,30 @@ bool DriveScene::on_enter() {
       S3D_WARN("SDMAIN.PVS palette not found; using fallback track colours");
     }
 
-    // Static terrain and non-animated elements.
+    // Static terrain and non-animated elements, split into depth layers so the
+    // renderer can bias them apart (ground base < terrain relief < elements <
+    // decals) and stop them z-fighting.
     world::TrackShapeStats stats;
-    MeshBuilder mb;
     if (have_palette) {
-      world::build_track_static_geometry(track_, lib, mb, palette_, &stats);
+      world::TrackMeshLayers layers;
+      MeshBuilder base, terrain, surface, overlay;
+      layers.base = &base;
+      layers.terrain = &terrain;
+      layers.surface = &surface;
+      layers.overlay = &overlay;
+      world::build_track_static_layers(track_, lib, layers, palette_, &stats);
+      track_base_ = base.to_mesh();
+      track_terrain_ = terrain.to_mesh();
+      track_element_ = surface.to_mesh();
+      track_overlay_ = overlay.to_mesh();
     } else {
+      MeshBuilder mb;
       world::build_track_static_geometry(track_, lib, mb, &stats);
+      track_element_ = mb.to_mesh();
     }
     S3D_INFO("drive track: ground=%d terrain=%d elements=%d overlays=%d missing=%d",
              stats.ground_cells, stats.terrain_shapes, stats.elements, stats.overlays,
              stats.missing_shapes);
-    track_mesh_ = mb.to_mesh();
 
     // Animated objects (windmill sails, Joe's flashing sign, ...), one mesh per
     // paint phase. The original cycles byte_3C0C6[game_frame & 15] over 0..3.
@@ -313,19 +339,26 @@ bool DriveScene::on_enter() {
     for (int phase = 0; phase < world::kTrackAnimationPhases; ++phase) {
       MeshBuilder amb;
       MeshBuilder alb;
+      MeshBuilder aob;
       if (have_palette) {
-        world::build_track_animated_geometry(track_, lib, amb, palette_, phase, &anim_stats, &alb);
+        world::TrackMeshLayers alayers;
+        alayers.surface = &amb;
+        alayers.overlay = &aob;
+        alayers.lines = &alb;
+        world::build_track_animated_layers(track_, lib, alayers, palette_, phase,
+                                           &anim_stats);
       } else {
         world::build_track_animated_geometry(track_, lib, amb, phase, &anim_stats, &alb);
       }
       animated_meshes_[phase] = amb.to_mesh();
+      animated_overlays_[phase] = aob.to_mesh();
       animated_lines_[phase] = alb.to_mesh();
     }
     S3D_INFO("drive track: %d animated objects (%d sign line verts)", anim_stats.animated,
              static_cast<int>(animated_lines_[0].vertex_count()));
   } else {
     S3D_WARN("no GAME1/GAME2 shapes found; falling back to placeholder geometry");
-    track_mesh_ = build_track_mesh(track_);
+    track_element_ = build_track_mesh(track_);
   }
 
   // ---- Player car ----------------------------------------------------------
@@ -597,7 +630,7 @@ void DriveScene::build_car_meshes() {
   // and car_rc2, so the front wheels steer and every wheel rides its suspension.
   MeshBuilder mb;
   world::append_car_model(mb, *car_lib_, glm::mat4(1.0f), car_color(backlight_off), 0,
-                          &wheel_pose_);
+                          &wheel_pose_, wheel_scale_);
   // The player car local bounding box (used to project the car to screen for the
   // crash explosion) is captured at the rest pose so it stays stable.
   if (!car_bounds_valid_) {
@@ -615,7 +648,7 @@ void DriveScene::build_car_meshes() {
 
   MeshBuilder mbb;
   world::append_car_model(mbb, *car_lib_, glm::mat4(1.0f), car_color(backlight_on), 0,
-                          &wheel_pose_);
+                          &wheel_pose_, wheel_scale_);
   car_mesh_braking_ = mbb.to_mesh();
 }
 
@@ -638,7 +671,7 @@ void DriveScene::build_opponent_meshes() {
 
   MeshBuilder mb;
   world::append_car_model(mb, *opponent_lib_, glm::mat4(1.0f), car_color(backlight_off), 0,
-                          &opponent_wheel_pose_);
+                          &opponent_wheel_pose_, wheel_scale_);
   // The opponent car local bounding box (used to size its crash explosion
   // billboard) is captured at the rest pose, like the player's.
   if (!opponent_bounds_valid_) {
@@ -655,7 +688,7 @@ void DriveScene::build_opponent_meshes() {
   opponent_mesh_ = mb.to_mesh();
   MeshBuilder mbb;
   world::append_car_model(mbb, *opponent_lib_, glm::mat4(1.0f), car_color(backlight_on), 0,
-                          &opponent_wheel_pose_);
+                          &opponent_wheel_pose_, wheel_scale_);
   opponent_mesh_braking_ = mbb.to_mesh();
 }
 
@@ -1698,15 +1731,33 @@ void DriveScene::render(Renderer& renderer, int width, int height) {
     aim_at(render_cam, car_world_position(alpha) + glm::vec3(0.0f, kFollowAimHeight, 0.0f));
   }
 
+
   // Sky and horizon panorama first, then the world overwrites them. draw_world
   // re-enables depth testing, so the sky pass drawing with it off is safe.
   draw_sky(render_cam, alpha, width, height);
 
-  renderer.draw_world(track_mesh_, render_cam);
+  // Static track, layered bottom-up with a growing polygon offset so the flat
+  // ground is always pushed behind the terrain, elements and decals. Without the
+  // bias the near-coplanar layers z-fight when the camera moves.
+  renderer.set_polygon_offset(kTrackBaseOffset, kTrackBaseOffset);
+  renderer.draw_world(track_base_, render_cam);
+  renderer.set_polygon_offset(kTrackTerrainOffset, kTrackTerrainOffset);
+  renderer.draw_world(track_terrain_, render_cam);
+  renderer.set_polygon_offset(kTrackSurfaceOffset, kTrackSurfaceOffset);
+  renderer.draw_world(track_element_, render_cam);
+  renderer.set_polygon_offset(-1.0f, -1.0f);  // Pull decals/overlays forward
+  renderer.draw_world(track_overlay_, render_cam);
 
   const int phase = world::track_animation_phase(game_frame_);
+  renderer.set_polygon_offset(kTrackSurfaceOffset, kTrackSurfaceOffset);
   renderer.draw_world(animated_meshes_[phase], render_cam);
   renderer.draw_world_lines(animated_lines_[phase], render_cam);
+  renderer.set_polygon_offset(-1.0f, -1.0f);  // Pull animated overlays forward
+  renderer.draw_world(animated_overlays_[phase], render_cam);
+
+  // The cars and debris are solid 3D objects, not layered decals, so clear the
+  // track bias before drawing them (otherwise they inherit the overlay pull).
+  renderer.set_polygon_offset(0.0f, 0.0f);
 
   if (!car_mesh_.empty() && camera_mode_ != 0) {
     const Mesh& body =

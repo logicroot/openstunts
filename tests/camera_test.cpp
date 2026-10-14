@@ -25,6 +25,21 @@ s3d::Camera forward_camera() {
 
 }  // namespace
 
+// fov_deg is the *horizontal* FOV: the left/right screen edges must sit at the
+// same horizontal angle whatever the window aspect, so the car keeps its width
+// on a widescreen window (the original builds its projection from a horizontal
+// half-angle). A point on the frustum edge at depth 1 must stay there.
+TEST(camera_fov_deg_is_horizontal) {
+  const s3d::Camera cam = forward_camera();
+  const float h = glm::radians(cam.fov_deg) * 0.5f;
+  for (float aspect : {4.0f / 3.0f, 16.0f / 9.0f, 21.0f / 9.0f}) {
+    // tan(h) / tan(v/2) = aspect, so ndc.x of the horizontal edge is 1.
+    const glm::vec3 edge(std::tan(h), 0.0f, 1.0f);
+    const glm::vec3 ndc = ndc_of(cam, edge, aspect);
+    EXPECT_TRUE(std::abs(ndc.x - 1.0f) < 1e-3f);
+  }
+}
+
 // The original engine projects with world +X on screen-right. GL lookAt is
 // right-handed, so this guards the deliberate left-handed flip in view().
 TEST(camera_world_plus_x_is_screen_right) {

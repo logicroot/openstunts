@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <string>
@@ -329,6 +330,64 @@ TEST(car_wheel_pose_tiny_angle_reflects_about_pivot) {
   for (size_t idx = static_cast<size_t>(base + 12); idx < static_cast<size_t>(base + 24); ++idx) {
     EXPECT_TRUE(posed.vertices[idx].x == rest[idx].x);
     EXPECT_TRUE(posed.vertices[idx].z == rest[idx].z);
+  }
+}
+
+// scale_car_wheels grows each wheel about its own centre and leaves the body
+// (and the other vertices) untouched; a scale of 1.0 is a no-op.
+TEST(car_wheel_scale_grows_wheels_about_their_centre) {
+  const std::string dir = find_asset_dir();
+  if (dir.empty()) return;
+  ShapeLibrary lib;
+  if (!load_car_archive(dir, "COUN", &lib)) return;
+  const Shape3D* car1 = lib.find("car1");
+  if (car1 == nullptr) return;
+  if (car1->vertices.size() <
+      static_cast<size_t>(kCarWheelFirstVertex + kCarWheelVertexCount)) {
+    return;
+  }
+
+  const auto bounds_of = [](const std::array<Vec3i, 6>& w) {
+    std::array<int, 6> b{32767, -32768, 32767, -32768, 32767, -32768};
+    for (const Vec3i& v : w) {
+      const int x = v.x, y = v.y, z = v.z;
+      b[0] = std::min(b[0], x); b[1] = std::max(b[1], x);
+      b[2] = std::min(b[2], y); b[3] = std::max(b[3], y);
+      b[4] = std::min(b[4], z); b[5] = std::max(b[5], z);
+    }
+    return b;
+  };
+
+  Shape3D scaled = *car1;
+  scale_car_wheels(&scaled, 2.0f);
+
+  // Non-wheel vertices are untouched.
+  for (size_t i = 0; i < car1->vertices.size(); ++i) {
+    if (i >= static_cast<size_t>(kCarWheelFirstVertex) &&
+        i < static_cast<size_t>(kCarWheelFirstVertex + kCarWheelVertexCount)) {
+      continue;
+    }
+    EXPECT_TRUE(scaled.vertices[i].x == car1->vertices[i].x);
+    EXPECT_TRUE(scaled.vertices[i].y == car1->vertices[i].y);
+    EXPECT_TRUE(scaled.vertices[i].z == car1->vertices[i].z);
+  }
+
+  // Every wheel grows in all three axes and keeps its own centre.
+  for (int w = 0; w < 4; ++w) {
+    const auto before = bounds_of(wheel_verts(*car1, w));
+    const auto after = bounds_of(wheel_verts(scaled, w));
+    EXPECT_TRUE(after[1] - after[0] > before[1] - before[0]);
+    EXPECT_TRUE(after[3] - after[2] > before[3] - before[2]);
+    EXPECT_TRUE(after[5] - after[4] > before[5] - before[4]);
+  }
+
+  // 1.0 leaves the mesh exactly as authored.
+  Shape3D same = *car1;
+  scale_car_wheels(&same, 1.0f);
+  for (size_t i = 0; i < car1->vertices.size(); ++i) {
+    EXPECT_TRUE(same.vertices[i].x == car1->vertices[i].x);
+    EXPECT_TRUE(same.vertices[i].y == car1->vertices[i].y);
+    EXPECT_TRUE(same.vertices[i].z == car1->vertices[i].z);
   }
 }
 

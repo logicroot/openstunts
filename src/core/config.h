@@ -12,7 +12,12 @@ struct Config {
   bool fullscreen = false;
   bool highdpi = true;
   float mouse_sensitivity = 0.12f;
-  float fov_deg = 65.0f;
+  // Horizontal field of view in degrees (the original racing projection is 80).
+  float fov_deg = 80.0f;
+  // Deliberate deviation from the original wheel data: the authored wheels are
+  // small blocks that read as "missing tyres" at modern resolutions, so each
+  // wheel is scaled about its own centre by this factor. 1.0 = original size.
+  float wheel_scale = 1.5f;
   bool show_fps = true;
   std::string asset_dir;
   std::string last_track = "DEFAULT.TRK";

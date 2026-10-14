@@ -14,6 +14,11 @@
 
 namespace s3d::world {
 
+// Number of facets used when reconstructing a round tyre from a wheel
+// primitive (see append_shape). Enough to read as a circle at the sizes the
+// cars are drawn at, while keeping the vertex count small.
+inline constexpr int kCarWheelSides = 12;
+
 // Color chosen per primitive paint index (one entry per material). Returning a
 // color with alpha 0 skips the primitive.
 using PaintColorFn = std::function<glm::vec4(uint8_t)>;

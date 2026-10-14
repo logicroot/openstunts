@@ -2,6 +2,7 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <cmath>
 #include <vector>
 
 namespace s3d::world {
@@ -17,6 +18,55 @@ glm::vec3 face_normal(const glm::vec3& a, const glm::vec3& b, const glm::vec3& c
   const glm::vec3 n = glm::cross(b - a, c - a);
   const float len = glm::length(n);
   return (len > 1e-6f) ? n / len : glm::vec3(0.0f, 1.0f, 0.0f);
+}
+
+// Smallest circle enclosing a set of 2D points. The wheel primitive only ever
+// has six rim points, so a brute force over every candidate circle (each pair's
+// diameter circle, each triple's circumcircle) is exact and trivially cheap.
+struct Circle2 {
+  glm::vec2 center{0.0f};
+  float radius = -1.0f;  // < 0 means "no circle"
+};
+
+bool circle_covers(const std::vector<glm::vec2>& pts, const Circle2& c) {
+  for (const glm::vec2& p : pts) {
+    if (glm::distance(p, c.center) > c.radius + 1e-4f) return false;
+  }
+  return true;
+}
+
+Circle2 minimal_enclosing_circle(const std::vector<glm::vec2>& pts) {
+  Circle2 best;
+  const auto consider = [&](const Circle2& c) {
+    if (c.radius <= 0.0f) return;
+    if (best.radius >= 0.0f && c.radius >= best.radius) return;
+    if (!circle_covers(pts, c)) return;
+    best = c;
+  };
+  for (size_t i = 0; i < pts.size(); ++i) {
+    for (size_t j = i + 1; j < pts.size(); ++j) {
+      consider({0.5f * (pts[i] + pts[j]), 0.5f * glm::distance(pts[i], pts[j])});
+    }
+  }
+  for (size_t i = 0; i < pts.size(); ++i) {
+    for (size_t j = i + 1; j < pts.size(); ++j) {
+      for (size_t k = j + 1; k < pts.size(); ++k) {
+        const glm::vec2& a = pts[i];
+        const glm::vec2& b = pts[j];
+        const glm::vec2& c = pts[k];
+        const float d = 2.0f * (a.x * (b.y - c.y) + b.x * (c.y - a.y) +
+                                c.x * (a.y - b.y));
+        if (std::abs(d) < 1e-5f) continue;  // collinear
+        const float a2 = a.x * a.x + a.y * a.y;
+        const float b2 = b.x * b.x + b.y * b.y;
+        const float c2 = c.x * c.x + c.y * c.y;
+        const glm::vec2 cc{(a2 * (b.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - b.y)) / d,
+                           (a2 * (c.x - b.x) + b2 * (a.x - c.x) + c2 * (b.x - a.x)) / d};
+        consider({cc, glm::distance(cc, a)});
+      }
+    }
+  }
+  return best;
 }
 
 void append_polygon(MeshBuilder& mb, const std::vector<glm::vec3>& pts,
@@ -72,17 +122,78 @@ void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
     if (prim.indices.size() < 3) continue;
 
     // Primitive type 12 is the original's dedicated wheel ("_primtype_wheel",
-    // primtypetab[12] = 3): the six referenced vertices form two quads that
-    // share the edge (v0,v3), and the software renderer draws whichever quad
-    // faces the camera. A z-buffered renderer can simply emit both.
+    // primtypetab[12] = 3). It is authored as a six-vertex wedge: three
+    // vertices on the tyre's inner face (ix[0..2]) and three on its outer face
+    // (ix[3..5]), describing only the upper part of the wheel, so faithfully
+    // drawn it reads as a flat triangle. Reconstruct the round tyre the data
+    // implies instead: a low-poly cylinder about the axle whose radius is the
+    // smallest circle enclosing the authored rim points. (A deliberate
+    // deviation, agreed with the user so the tyres read as tyres.) The closed
+    // cylinder also keeps the tyre opaque, which the original's two
+    // camera-facing quads could not do in a z-buffered renderer.
     if (prim.type == 12 && prim.indices.size() >= 6) {
       const std::vector<uint8_t>& ix = prim.indices;
-      const int quads[2][4] = {{0, 1, 2, 3}, {3, 4, 5, 0}};
-      for (const auto& q : quads) {
+      bool in_range = true;
+      for (int k = 0; k < 6; ++k) {
+        if (ix[static_cast<size_t>(k)] >= pts.size()) in_range = false;
+      }
+      if (in_range) {
+        const glm::vec3 a0 = pts[ix[0]], a1 = pts[ix[1]], a2 = pts[ix[2]];
+        const glm::vec3 b0 = pts[ix[3]], b1 = pts[ix[4]], b2 = pts[ix[5]];
+        const glm::vec3 inner = (a0 + a1 + a2) / 3.0f;
+        const glm::vec3 outer = (b0 + b1 + b2) / 3.0f;
+        const glm::vec3 axle = outer - inner;
+        const float width = glm::length(axle);
+        if (width > 1e-3f) {
+          const glm::vec3 axis = axle / width;
+          // Any basis perpendicular to the axle spans the tyre's face.
+          const glm::vec3 helper =
+              (std::abs(axis.y) < 0.9f) ? glm::vec3(0.0f, 1.0f, 0.0f) : glm::vec3(1.0f, 0.0f, 0.0f);
+          const glm::vec3 u = glm::normalize(glm::cross(axis, helper));
+          const glm::vec3 v = glm::cross(axis, u);
+          const glm::vec3 rim[6] = {a0, a1, a2, b0, b1, b2};
+          std::vector<glm::vec2> flat;
+          flat.reserve(6);
+          for (const glm::vec3& r : rim) {
+            const glm::vec3 d = r - inner;
+            flat.push_back(glm::vec2(glm::dot(d, u), glm::dot(d, v)));
+          }
+          const Circle2 circle = minimal_enclosing_circle(flat);
+          if (circle.radius > 1e-3f) {
+            const glm::vec3 centre = inner + circle.center.x * u + circle.center.y * v;
+            std::vector<glm::vec3> ring_in, ring_out;
+            ring_in.reserve(kCarWheelSides);
+            ring_out.reserve(kCarWheelSides);
+            for (int s = 0; s < kCarWheelSides; ++s) {
+              const float angle =
+                  6.28318530718f * static_cast<float>(s) / static_cast<float>(kCarWheelSides);
+              const glm::vec3 rad =
+                  circle.radius * (std::cos(angle) * u + std::sin(angle) * v);
+              ring_in.push_back(centre + rad);
+              ring_out.push_back(centre + axle + rad);
+            }
+            append_polygon(mb, ring_out, color);  // outer sidewall
+            const std::vector<glm::vec3> ring_in_rev(ring_in.rbegin(), ring_in.rend());
+            append_polygon(mb, ring_in_rev, color);  // inner sidewall
+            for (int s = 0; s < kCarWheelSides; ++s) {
+              const int t = (s + 1) % kCarWheelSides;
+              append_polygon(mb, {ring_in[s], ring_out[s], ring_out[t], ring_in[t]}, color);
+            }
+            continue;
+          }
+        }
+      }
+      // Degenerate/unexpected wheel data: fall back to the closed prism of the
+      // authored wedge rather than dropping the primitive.
+      const int faces[5][4] = {
+          {0, 1, 2, -1}, {5, 4, 3, -1},
+          {0, 1, 4, 3}, {1, 2, 5, 4}, {2, 0, 3, 5},
+      };
+      for (const auto& f : faces) {
         std::vector<glm::vec3> poly;
         poly.reserve(4);
-        for (int k = 0; k < 4; ++k) {
-          const uint8_t idx = ix[static_cast<size_t>(q[k])];
+        for (int k = 0; k < 4 && f[k] >= 0; ++k) {
+          const uint8_t idx = ix[static_cast<size_t>(f[k])];
           if (idx < pts.size()) poly.push_back(pts[idx]);
         }
         append_polygon(mb, poly, color);

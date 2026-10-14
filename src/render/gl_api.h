@@ -45,7 +45,9 @@ typedef long long GLsizeiptr;
 
 #define GL_DEPTH_TEST 0x0B71
 #define GL_LESS 0x0201
+#define GL_LEQUAL 0x0203
 #define GL_CULL_FACE 0x0B44
+#define GL_POLYGON_OFFSET_FILL 0x8037
 #define GL_BACK 0x0405
 #define GL_FRONT 0x0404
 #define GL_CCW 0x0901
@@ -133,6 +135,7 @@ extern void S3D_GLAPI glCullFace(GLenum mode);
 extern void S3D_GLAPI glFrontFace(GLenum mode);
 extern void S3D_GLAPI glLineWidth(GLfloat width);
 extern void S3D_GLAPI glPolygonMode(GLenum face, GLenum mode);
+extern void S3D_GLAPI glPolygonOffset(GLfloat factor, GLfloat units);
 
 extern const GLubyte* S3D_GLAPI glGetString(GLenum name);
 extern void S3D_GLAPI glGetIntegerv(GLenum pname, GLint* params);

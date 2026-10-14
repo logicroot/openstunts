@@ -68,11 +68,20 @@ void main() {
 bool Renderer::init() {
   if (!world_shader_.build(kWorldVS, kWorldFS, "world")) return false;
   glEnable(GL_DEPTH_TEST);
-  glDepthFunc(GL_LESS);
+  glDepthFunc(GL_LEQUAL);
   return true;
 }
 
 void Renderer::shutdown() { world_shader_.destroy(); }
+
+void Renderer::set_polygon_offset(float factor, float units) {
+  if (factor == 0.0f && units == 0.0f) {
+    glDisable(GL_POLYGON_OFFSET_FILL);
+  } else {
+    glEnable(GL_POLYGON_OFFSET_FILL);
+    glPolygonOffset(factor, units);
+  }
+}
 
 void Renderer::begin_frame(int drawable_width, int drawable_height,
                            const glm::vec3& clear_color) {
@@ -84,6 +93,8 @@ void Renderer::begin_frame(int drawable_width, int drawable_height,
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   glEnable(GL_DEPTH_TEST);
   glDepthMask(GL_TRUE);
+  glDisable(GL_POLYGON_OFFSET_FILL);
+  glDepthFunc(GL_LEQUAL);
 }
 
 void Renderer::draw_world(const Mesh& mesh, const Camera& camera,

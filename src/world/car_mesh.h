@@ -66,6 +66,14 @@ struct CarWheelPose {
 // Exposed for tests.
 void apply_car_wheel_pose(Shape3D* shape, const CarWheelPose& pose);
 
+// Deliberate deviation from the original data (see Config::wheel_scale). The
+// authored wheels are 6x6x8-unit corner blocks -- faithful, but at modern
+// resolutions they read as "missing tyres". This scales each of the four
+// wheels about its own centre by `scale` (1.0 leaves them alone), so the tyres
+// become clearly visible without modifying the on-disk assets. A shape without
+// the wheel block (car2) is left unchanged.
+void scale_car_wheels(Shape3D* shape, float scale);
+
 // Loads `ST<car_id>.P3S` from `asset_dir`. `car_id` is four characters, e.g.
 // "COUN". Returns false if the archive cannot be read.
 bool load_car_archive(const std::string& asset_dir, const std::string& car_id,
@@ -96,8 +104,10 @@ glm::vec4 car_primitive_color(uint8_t paint, const Palette& palette,
 //
 // When `wheel_pose` is non-null the car1 wheel block is animated with it first
 // (frame.c sub_204AE: steering + suspension). car2 has no wheels and ignores it.
+// `wheel_scale` then enlarges the posed wheels about their own centres (see
+// scale_car_wheels); 1.0 keeps the authored size.
 void append_car_model(MeshBuilder& mb, const ShapeLibrary& car_lib, const glm::mat4& model,
                       const PaintColorFn& color_for, int material = 0,
-                      const CarWheelPose* wheel_pose = nullptr);
+                      const CarWheelPose* wheel_pose = nullptr, float wheel_scale = 1.0f);
 
 }  // namespace s3d::world

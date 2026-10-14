@@ -21,6 +21,7 @@ int main(int argc, char** argv) {
   int opp_type_arg = 0;
   std::string screenshot_path;
   int screenshot_frame = 0;
+  int camera_mode = 0;
   bool top_down = false;
   bool drive = false;
 
@@ -37,6 +38,8 @@ int main(int argc, char** argv) {
       if (screenshot_frame == 0) screenshot_frame = 3;
     } else if (a == "--frames" && i + 1 < argc) {
       screenshot_frame = std::atoi(argv[++i]);
+    } else if (a == "--camera" && i + 1 < argc) {
+      camera_mode = std::atoi(argv[++i]);
     } else if (a == "--drive") {
       drive = true;
     } else if (a == "--top") {
@@ -46,7 +49,7 @@ int main(int argc, char** argv) {
           "Stunts3D — 3D reimplementation of Stunts\n"
           "usage: stunts3d [--assets DIR] [--track FILE.trk] [--config FILE]\n"
           "                [--car ID] [--opp-car ID] [--opp N] [--screenshot out.png]\n"
-          "                [--frames N] [--top] [--drive]\n");
+          "                [--frames N] [--camera N] [--top] [--drive]\n");
       return 0;
     } else {
       S3D_WARN("unknown argument: %s", a.c_str());
@@ -76,7 +79,9 @@ int main(int argc, char** argv) {
   if (drive) {
     auto scene = std::make_unique<DriveScene>(std::move(track), asset_dir,
                                              config.player_car, config.opponent_car,
-                                             config.opponent_type);
+                                             config.opponent_type, config.fov_deg,
+                                             config.wheel_scale);
+    scene->set_camera_mode(camera_mode);
     if (!screenshot_path.empty()) scene->request_screenshot(screenshot_path, screenshot_frame);
     app.set_scene(std::move(scene));
   } else {
