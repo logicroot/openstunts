@@ -1,6 +1,8 @@
 #include "render/camera.h"
 #include "tiny_test.h"
 
+#include <cmath>
+
 #include <glm/glm.hpp>
 
 namespace {
@@ -71,4 +73,20 @@ TEST(camera_mouse_right_turns_view_right) {
   cam.add_mouse(10.0f, 0.0f);
   const glm::vec3 turn = cam.forward() - before;
   EXPECT_TRUE(glm::dot(turn, screen_right) > 0.0f);
+}
+
+// Regression: the cockpit camera must face the car's nose, not backwards and
+// not up at the sky. The car places its nose at R_y(-yaw)*+Z = (-sin, 0, cos)
+// for the yaw given in radians (0x400 units per turn).
+TEST(camera_cockpit_yaw_faces_car_nose) {
+  constexpr float kAngleToRadians = 6.28318530718f / 1024.0f;
+  for (int units : {0, 128, 256, 300, 512, 640, 768, 896, 1023}) {
+    const float yaw = static_cast<float>(units) * kAngleToRadians;
+    s3d::Camera cam;
+    cam.pitch_deg = 0.0f;
+    cam.yaw_deg = s3d::nose_forward_yaw_deg(yaw);
+    const glm::vec3 nose(-std::sin(yaw), 0.0f, std::cos(yaw));
+    // A flipped sign would score -1 here; a 90-degree error would score 0.
+    EXPECT_TRUE(glm::dot(cam.forward(), nose) > 0.999f);
+  }
 }

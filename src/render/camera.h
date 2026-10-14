@@ -61,4 +61,13 @@ class Camera {
   }
 };
 
+// Yaw (in degrees) that makes a Camera's forward() point down a car's nose.
+// The car model places its nose at R_y(-yaw)*+Z = (-sin yaw, 0, cos yaw) for a
+// yaw in radians, whereas Camera::forward() points along +Z at yaw = +90 deg
+// (see forward_camera in the camera tests). The cockpit camera therefore adds a
+// quarter turn; the sign is not flipped, or the view faces backwards.
+inline float nose_forward_yaw_deg(float nose_yaw_rad) {
+  return glm::degrees(nose_yaw_rad) + 90.0f;
+}
+
 }  // namespace s3d

@@ -1048,7 +1048,7 @@ void DriveScene::update_camera() {
     camera_.position = eye_pos;
     // Set orientation from car yaw/pitch, looking slightly down for cockpit
     const float yaw_r = car_yaw(alpha);
-    camera_.yaw_deg = glm::degrees(-yaw_r - glm::pi<float>() * 0.5f);  // adjust to Camera convention
+    camera_.yaw_deg = nose_forward_yaw_deg(yaw_r);  // face the car's nose
     camera_.pitch_deg = glm::degrees(car_pitch(alpha)) - 5.0f;  // look slightly down
     if (camera_.pitch_deg > 89.0f) camera_.pitch_deg = 89.0f;
     if (camera_.pitch_deg < -89.0f) camera_.pitch_deg = -89.0f;
@@ -1690,7 +1690,13 @@ void DriveScene::render(Renderer& renderer, int width, int height) {
   // which makes the car jitter back and forth within the frame.
   Camera render_cam = camera_;
   render_cam.position = glm::mix(camera_prev_.position, camera_.position, alpha);
-  aim_at(render_cam, car_world_position(alpha) + glm::vec3(0.0f, kFollowAimHeight, 0.0f));
+  if (camera_mode_ != 0) {
+    // The chase camera is re-aimed at the interpolated car so the two stay
+    // locked. The cockpit camera keeps the orientation update_camera() derived
+    // from the car pose: its eye sits at the car, so aiming at a point above the
+    // car would tilt the view straight up at the sky.
+    aim_at(render_cam, car_world_position(alpha) + glm::vec3(0.0f, kFollowAimHeight, 0.0f));
+  }
 
   // Sky and horizon panorama first, then the world overwrites them. draw_world
   // re-enables depth testing, so the sky pass drawing with it off is safe.
