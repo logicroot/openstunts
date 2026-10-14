@@ -123,6 +123,13 @@ constexpr int16_t kHighEntrXOutBounds[7] = {120, 168, 216, 264, 312, 360, 360};
 constexpr int16_t kBkRdEntrZAdjust[4] = {
     static_cast<int16_t>(65285), static_cast<int16_t>(65452), 84, 251};
 
+// Corkscrew left/right (code_bto_corkLr) z band per band region (dseg.asm
+// corkLR_negZBound / corkLR_posZBound). Index 0 is the "no band" sentinel.
+constexpr int16_t kCorkLrNegZBound[12] = {
+    0, -94, -187, -280, -373, -466, -559, -652, -745, -838, -931, -1024};
+constexpr int16_t kCorkLrPosZBound[12] = {
+    0, 1024, 931, 838, 745, 652, 559, 466, 373, 280, 187, 94};
+
 }  // namespace
 
 TrackCollision::TrackCollision() = default;
@@ -644,6 +651,83 @@ void TrackCollision::build_track_object_from_track(const s3d::Track& track,
         if (turn > 0x66) {
           wall_orient_mod = kOrient180;
           wallindex = wallsel + 0x7B;
+        }
+        break;
+      }
+      // ---- Corkscrew left/right (code_bto_corkLr) ------------------------
+      case PHYS_CORK_LR: {
+        if (abs_x >= 0x96) break;
+        const int height = static_cast<int>(world_pos.y) - terrain_height;
+        if (height >= 0x109) break;
+        set_pavement();
+        const bool high = height > 0x97;
+        // Region 0 means "no band": the spiral is not under the wheel yet.
+        int region = 0;
+        if (height > 0x58 && !high) {
+          region = vx < 0 ? 3 : 9;
+        } else if (abs_x < 0x1F) {
+          if (high) region = 6;
+        } else if (vx < static_cast<int16_t>(0xFFAC)) {
+          region = high ? 4 : 2;
+        } else if (vx < 0) {
+          region = high ? 5 : 1;
+        } else if (vx > 0x54) {
+          region = high ? 8 : 0xA;
+        } else {
+          region = high ? 7 : 0xB;
+        }
+        if (region != 0 && kCorkLrNegZBound[region] < vz &&
+            kCorkLrPosZBound[region] > vz) {
+          planindex = region + 0x39;
+        }
+        if (planindex != 0) break;
+        if (abs_z >= 0x200) break;
+        wall_height = 0x75;
+        wallindex = 0xB9;
+        break;
+      }
+      // ---- Corkscrew up/down (code_bto_corkUdLH / code_bto_corkUdRH) ------
+      case PHYS_CORK_UD_LH:
+      case PHYS_CORK_UD_RH: {
+        const bool rh = phys == PHYS_CORK_UD_RH;
+        const int16_t misc1e = rh ? vx : wrap_negate(vx);
+        const int misc22 = rh ? 0x69 : 0x4F;
+        const int var_c = rh ? 0x00 : 0x32;
+        const int var_e = rh ? 0x19 : 0x4B;
+        const int height = static_cast<int>(world_pos.y) - terrain_height;
+        if (vz < 0 && height < 0x64 && misc1e > 0) {
+          if (misc1e >= 0x278) break;
+          if (misc1e <= 0x188) break;
+          set_pavement();
+          planindex = misc22;
+          break;
+        }
+        if (vz > 0 && height > 0x15E && misc1e < 0x2B4 && misc1e > 0x14C) {
+          wall_height = 0x2A;
+          wall_lower_bound = -12;
+          wallindex = (misc1e > 0x200 ? var_c : var_e) + 0x18;
+          set_pavement();
+          planindex = misc22 + 0x19;
+          break;
+        }
+        const int turn = polar_radius(vz, misc1e);
+        if (turn <= 0x14C) break;
+        if (turn >= 0x2B4) break;
+        int16_t angle = static_cast<int16_t>(polar_angle_2d(vz, misc1e));
+        angle = wrap_negate(wrap_sub(angle, 0x100));
+        angle = static_cast<int16_t>(angle & 0x3FF);
+        const int si = s16_wrap(angle * 0x18) >> 10;
+        planindex = misc22 + si + 1;
+        set_pavement();
+        wall_height = 0x2A;
+        wall_lower_bound = -12;
+        const int del = turn - 0x200;
+        if (del > 0x5A) {
+          wallindex = var_c + si;
+        } else if (del < static_cast<int16_t>(0xFFA6)) {
+          break;
+        } else {
+          wallindex = var_e + si;
         }
         break;
       }

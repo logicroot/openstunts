@@ -362,6 +362,62 @@ TEST(track_collision_build_object_scenery_pine_has_no_wall) {
 }
 
 // ---------------------------------------------------------------------------
+// Corkscrew walls / planes (code_bto_corkLr / code_bto_corkUd*)
+// ---------------------------------------------------------------------------
+TEST(track_collision_build_object_corkscrew_lr_wall) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  Track t = empty_track();
+  set_item(&t, 3, 4, 85);  // item 85: corkscrew l/r, rot 0, physical model 35
+  tc.set_track(&t);
+
+  // multi_tile 1 -> the element centre's z is the cell's lower edge (row*1024).
+  const int cx = 3 * 1024 + 512;
+  const int cz = 4 * 1024;
+  CollisionSample s;
+  tc.build_track_object(word_pos(cx, 0, cz), word_pos(cx, 0, cz), &s);
+  EXPECT_EQ(s.physical_model, 35);
+  EXPECT_EQ(s.plane_index, 0);
+  EXPECT_EQ(s.wall_index, 0xB9);
+  EXPECT_EQ(s.wall_height, 0x75);
+}
+
+TEST(track_collision_build_object_corkscrew_ud_wall_and_plane) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  Track t = empty_track();
+  set_item(&t, 3, 4, 198);  // item 198: cork u/d A, rot 0, physical model 32
+  tc.set_track(&t);
+
+  // multi_tile 3 -> x centre is (col+1)*1024, z centre is row*1024.
+  const int cx = 4 * 1024;
+  const int cz = 4 * 1024;
+  CollisionSample s;
+  // vz > 0 with a raised wheel takes the walled branch: wall 0x63, plane 0x68.
+  tc.build_track_object(word_pos(cx - 0x200, 400, cz + 0x100),
+                        word_pos(cx - 0x200, 400, cz + 0x100), &s);
+  EXPECT_EQ(s.physical_model, 32);
+  EXPECT_EQ(s.wall_index, 0x63);
+  EXPECT_EQ(s.plane_index, 0x68 * 4);
+  EXPECT_EQ(s.wall_height, 0x2A);
+  EXPECT_EQ(s.surface_type, static_cast<int8_t>(CarSurfaceType::Paved));
+
+  // The same spot at ground level falls to the spiral branch: a plane and a
+  // radial wall, both non-trivial.
+  tc.build_track_object(word_pos(cx - 0x200, 0, cz + 0x100),
+                        word_pos(cx - 0x200, 0, cz + 0x100), &s);
+  EXPECT_TRUE(s.plane_index != 0);
+  EXPECT_TRUE(s.wall_index >= 0);
+  EXPECT_EQ(s.surface_type, static_cast<int8_t>(CarSurfaceType::Paved));
+}
+
+// ---------------------------------------------------------------------------
 // Real track sanity check
 // ---------------------------------------------------------------------------
 TEST(track_collision_build_object_real_track_road_cell) {
