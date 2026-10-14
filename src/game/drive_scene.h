@@ -203,6 +203,10 @@ class DriveScene : public Scene {
   // state.field_45E: the last run_opponent_ai return (0 none, 1 first-edge
   // side, 2 second-edge side), driving the HUD opponent-near indicator.
   int opponent_field_45e_ = 0;
+  // state.field_144 (statecrs.c loc_19730): the opponent's official finish time
+  // in 20 Hz frames, or kRaceNotFinished while it is still running. Set once, on
+  // the tick its crash flag becomes kCrashEventFinish (opponent_op loc_14D66).
+  int opponent_finish_frame_ = game::kRaceNotFinished;
   // The AI's course path (trackdata3): race_.route.opponent_path() over the
   // opponent's sped table. Rebuilt when the race is (re)set up.
   std::vector<uint16_t> opponent_path_;

@@ -772,6 +772,7 @@ void DriveScene::reset_opponent_car() {
 
   // The original zeroes state.field_45E at race setup (init_game_state).
   opponent_field_45e_ = 0;
+  opponent_finish_frame_ = game::kRaceNotFinished;
 
   // The same init_carstate_from_simd defaults as the player (restunts.c:371):
   // automatic transmission, first gear, idle rpm, the gear lever at first.
@@ -930,6 +931,17 @@ void DriveScene::physics_tick(const Controls& controls) {
         opponent_setup(), &opponent_ai_, &opponent_, car_, opponent_spec_,
         physics::kGameFrameRateNormal, sampler, &collision_);
 
+    // The opponent's official finish (opponent_op loc_14D66 calls
+    // update_crash_state(3, 1)): field_144 = game_frame + elapsed_time1. Unlike
+    // the player it carries no route penalty. Recorded once, on the tick the
+    // flag is raised.
+    if (opponent_finish_frame_ < 0 &&
+        opponent_.car_crashBmpFlag == physics::kCrashEventFinish) {
+      opponent_finish_frame_ = race_.game_frame;
+      S3D_INFO("opponent finish: %s",
+               game::format_race_time(opponent_finish_frame_, 20, true).c_str());
+    }
+
     // The opponent's collision pass (update_player_state loc_164B2..loc_16550
     // with MplayerFlag = 1): the opponent's box against the player's updated
     // pose. The player's pass has already set the contact latch, so this only
@@ -977,10 +989,10 @@ void DriveScene::physics_tick(const Controls& controls) {
 
   // Finish-line test (state.c loc_17771): the run only finishes once the car
   // has returned to route node 0 after passing another node (playerstate
-  // field_CD). On the forward crossing the original sets car_crashBmpFlag = 3
-  // and records the total finish time.
+  // field_CD). On the forward crossing the original calls update_crash_state(3,
+  // 0), which sets car_crashBmpFlag = 3 and records game_total_finish.
   if (race_.update_finish(car_.car_position.x, car_.car_position.z, start_finish_)) {
-    car_.car_crashBmpFlag = 3;
+    car_.car_crashBmpFlag = physics::kCrashEventFinish;
     S3D_INFO("finish: %s", game::format_race_time(race_.total_finish, 20, true).c_str());
   }
 
@@ -1299,20 +1311,50 @@ void DriveScene::build_hud(std::vector<Vertex>& verts, int width, int height,
   // The original draws the elapsed time with FONTLED at x=0x8C (320-wide screen)
   // and y=roofbmpheight+2; here it sits at the top centre and scales with the
   // window. intro_draw_text draws a black copy offset by one pixel first.
+  // With the cockpit panel shown the roof strip pushes the clock down,
+  // otherwise it stays at the top of the view.
+  const int roof_rows =
+      (dashboard_on_ && dashboard_.valid()) ? dashboard_.roof_height() : 0;
+  const float hud_top = static_cast<float>(std::max(4, roof_rows + 2)) * scale;
+
   if (hud_font_.valid()) {
-    // Chase-cam HUD shows MM:SS (format_frame_as_string with the hundredths flag
-    // clear); the hundredths form belongs to the finished-time/evaluation screen.
-    const std::string time_str = game::format_race_time(race_.game_frame, 20, false);
+    // While racing the clock counts MM:SS (format_frame_as_string with the
+    // hundredths flag clear). Once the player crosses the line it freezes on the
+    // official total_finish (tick() stops advancing game_frame) and switches to
+    // the hundredths form the original reserves for finished times.
+    const int frames = race_.finished ? race_.total_finish : race_.game_frame;
+    const std::string time_str =
+        game::format_race_time(frames, 20, race_.finished);
     const float text_w = static_cast<float>(hud_font_.text_width(time_str)) * scale;
     const float x = (static_cast<float>(width) - text_w) * 0.5f;
-    // The original draws the clock at y = roofbmpheight + 2 (frame.c): with the
-    // cockpit panel shown the roof strip pushes it down, otherwise it stays at
-    // the top of the view.
-    const int roof_rows =
-        (dashboard_on_ && dashboard_.valid()) ? dashboard_.roof_height() : 0;
-    const float y = static_cast<float>(std::max(4, roof_rows + 2)) * scale;
-    append_text(verts, hud_font_, time_str, x + scale, y + scale, scale, hud_shadow_);
-    append_text(verts, hud_font_, time_str, x, y, scale, hud_fg_);
+    append_text(verts, hud_font_, time_str, x + scale, hud_top + scale, scale, hud_shadow_);
+    append_text(verts, hud_font_, time_str, x, hud_top, scale, hud_fg_);
+  }
+
+  // Race result (statecrs.c loc_19730 records the two official times; the
+  // original then swaps to the full-screen opp<n>win/lose evaluation). Here the
+  // outcome is drawn under the frozen clock with the banner font -- WIN / LOSE
+  // against the opponent, plus its official time when it finished too.
+  if (race_.finished && text_font_.valid()) {
+    const game::RaceOutcome outcome =
+        game::race_outcome(race_.total_finish, opponent_finish_frame_);
+    const std::string verdict =
+        (outcome == game::RaceOutcome::OpponentWins) ? "LOSE" : "WIN";
+    const float vw = static_cast<float>(text_font_.text_width(verdict)) * scale;
+    const float vx = (static_cast<float>(width) - vw) * 0.5f;
+    const float vy =
+        hud_top + static_cast<float>(hud_font_.rows() + 4) * scale;
+    append_text(verts, text_font_, verdict, vx + scale, vy + scale, scale, hud_shadow_);
+    append_text(verts, text_font_, verdict, vx, vy, scale, hud_fg_);
+    if (opponent_finish_frame_ >= 0) {
+      const std::string opp =
+          "opp " + game::format_race_time(opponent_finish_frame_, 20, true);
+      const float ow = static_cast<float>(text_font_.text_width(opp)) * scale;
+      const float ox = (static_cast<float>(width) - ow) * 0.5f;
+      const float oy = vy + static_cast<float>(text_font_.rows() + 2) * scale;
+      append_text(verts, text_font_, opp, ox + scale, oy + scale, scale, hud_shadow_);
+      append_text(verts, text_font_, opp, ox, oy, scale, hud_fg_);
+    }
   }
 
   const float cx = static_cast<float>(width) * 0.5f;

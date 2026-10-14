@@ -67,8 +67,10 @@ inline constexpr int kGripBehaviorPlayer = 1;
 inline constexpr int kCrashEventNone = 0;
 inline constexpr int kCrashEventCollision = 1;
 inline constexpr int kCrashEventWater = 2;
-// update_crash_state(3, MplayerFlag): driving off the course band (lap 1+).
-inline constexpr int kCrashEventOffTrack = 3;
+// update_crash_state(3, MplayerFlag): the start/finish line was crossed forward
+// on lap 1+ (statecrs.c loc_19730). The player stores game_total_finish, the
+// opponent stores field_144; both then brake out of the run.
+inline constexpr int kCrashEventFinish = 3;
 
 // Per-frame car sound flags (restunts gamestate.h).
 inline constexpr int kCarSoundNone = 0;

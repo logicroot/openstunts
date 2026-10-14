@@ -211,9 +211,9 @@ TEST(ai_advances_checkpoint_when_close) {
 }
 
 // An un-crashed player just ahead of a lap-1+ opponent (parked past the start
-// line) selects the first-edge interception and the off-track band crashes the
-// opponent.
-TEST(ai_player_ahead_sets_intercept_then_offtrack_crash) {
+// line) selects the first-edge interception and, having crossed the line on lap
+// one, finishes (opponent_op loc_14D66 -> update_crash_state(3, 1)).
+TEST(ai_player_ahead_sets_intercept_then_finish) {
   AiFixture fx;
   const auto setup = make_setup(fx);
   const CarSpec spec = test_spec();
@@ -221,7 +221,7 @@ TEST(ai_player_ahead_sets_intercept_then_offtrack_crash) {
   CarState opp = resting_opp(spec);
   opp.car_position.z = static_cast<int32_t>(0xA80) << 6;  // past row-2 centre (0xA00)
   opp.car_velocity_heading_offset = 1;
-  opp.car_lap_count = 1;  // the off-track band only applies from lap one
+  opp.car_lap_count = 1;  // the finish line only applies from lap one
 
   CarState player = resting_opp(spec);
   player.car_position.z = static_cast<int32_t>(0xA80 + 100) << 6;  // just ahead
@@ -241,5 +241,5 @@ TEST(ai_player_ahead_sets_intercept_then_offtrack_crash) {
                       nullptr);
 
   EXPECT_EQ(ret, 1);  // first-edge interception (the player is on that side)
-  EXPECT_EQ(opp.car_crashBmpFlag, kCrashEventOffTrack);
+  EXPECT_EQ(opp.car_crashBmpFlag, kCrashEventFinish);
 }

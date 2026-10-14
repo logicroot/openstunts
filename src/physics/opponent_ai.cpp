@@ -355,7 +355,7 @@ var_e_select:  // loc_14B72
   // opponent's pass, matching the original's player_op -> opponent_op order.
 
   // loc_14C49: the checkpoint heading error, skipped while crashed.
-  if (opp->car_crashBmpFlag != kCrashEventNone) goto off_track_crash;
+  if (opp->car_crashBmpFlag != kCrashEventNone) goto finish_line;
   {
     var_26 = wrap_sub(opp->car_route_target.x, shr6(opp->car_position.x));
     var_24 = wrap_sub(opp->car_route_target.y, shr6(opp->car_position.y));
@@ -367,10 +367,10 @@ var_e_select:  // loc_14B72
         static_cast<int16_t>(fixed::polar_angle(wrap_negate(out.x), out.z)) & 0x3FF;
   }
 
-off_track_crash:  // loc_14CD7
+finish_line:  // loc_14CD7
   if (opp->car_lap_count != 0) {
     // Distance from the start cell centre along the start direction; once it
-    // goes negative (the car has passed the line) the lap-1+ car is off track.
+    // goes negative the lap-1+ car has crossed the line and finishes.
     const int16_t band =
         wrap_add(fixed::multiply_and_scale(
                      fixed::cos_fast(static_cast<uint16_t>(setup.track_angle)),
@@ -378,7 +378,7 @@ off_track_crash:  // loc_14CD7
                  fixed::multiply_and_scale(
                      fixed::sin_fast(static_cast<uint16_t>(setup.track_angle)),
                      wrap_sub(col_center(setup.start_col), shr6(opp->car_position.x))));
-    if (band < 0) opp->car_crashBmpFlag = kCrashEventOffTrack;  // update_crash_state(3, 1)
+    if (band < 0) opp->car_crashBmpFlag = kCrashEventFinish;  // update_crash_state(3, 1)
   }
 
   return field_45e;

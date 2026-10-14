@@ -108,6 +108,19 @@ TEST(race_format_matches_frame_as_string) {
   EXPECT_EQ(format_race_time(60 * 10 + 3 * 10 + 4, 10, true), std::string(" 1:03.40"));
 }
 
+TEST(race_outcome_from_finish_times) {
+  // The run is not decided until the player crosses the line.
+  EXPECT_TRUE(race_outcome(kRaceNotFinished, kRaceNotFinished) == RaceOutcome::Running);
+  EXPECT_TRUE(race_outcome(kRaceNotFinished, 500) == RaceOutcome::Running);
+  // The player finished while the opponent is still on course: the player wins.
+  EXPECT_TRUE(race_outcome(500, kRaceNotFinished) == RaceOutcome::OpponentRunning);
+  // Both finished: the lower official time wins.
+  EXPECT_TRUE(race_outcome(500, 620) == RaceOutcome::PlayerWins);
+  EXPECT_TRUE(race_outcome(620, 500) == RaceOutcome::OpponentWins);
+  // A dead heat counts as a player win (crossed the line on the deciding frame).
+  EXPECT_TRUE(race_outcome(500, 500) == RaceOutcome::PlayerWins);
+}
+
 TEST(race_state_route_gate_and_finish) {
   const Track t = make_loop_track();
   const StartFinish sf = find_start_finish(t);

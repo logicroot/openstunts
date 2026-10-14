@@ -68,6 +68,25 @@ RaceSpawnDelta race_spawn_delta(int angle, int lateral);
 // the remaining frames.
 std::string format_race_time(int frames, int frames_per_sec, bool hundredths);
 
+// Official finish times are recorded once a car crosses the line (statecrs.c
+// loc_19730: the player's game_total_finish, the opponent's field_144). A car
+// that never finished reports kRaceNotFinished, matching the zero the original
+// leaves in those fields.
+inline constexpr int kRaceNotFinished = -1;
+
+// The race outcome, evaluated from the two official finish times.
+enum class RaceOutcome {
+  Running,          // the player has not finished yet
+  OpponentRunning,  // the player finished while the opponent is still on course
+  PlayerWins,       // both finished; the player's time is lower
+  OpponentWins,     // both finished; the opponent's time is lower
+};
+
+// Compares the two official finish times in 20 Hz frames (`kRaceNotFinished` for
+// a car that never crossed the line). A tie counts as a player win, since the
+// player crossed the line on the deciding frame.
+RaceOutcome race_outcome(int player_finish, int opponent_finish);
+
 // One `detect_penalty` lookup (seg001.asm). The original returns a node and a
 // distance through its two out-pointers; `located` is the boolean return.
 struct PenaltyProbe {

@@ -129,6 +129,13 @@ std::string format_race_time(int frames, int frames_per_sec, bool hundredths) {
   return out;
 }
 
+RaceOutcome race_outcome(int player_finish, int opponent_finish) {
+  if (player_finish < 0) return RaceOutcome::Running;
+  if (opponent_finish < 0) return RaceOutcome::OpponentRunning;
+  return opponent_finish < player_finish ? RaceOutcome::OpponentWins
+                                         : RaceOutcome::PlayerWins;
+}
+
 // ---------------------------------------------------------------------------
 // Route setup and the wrong-way / off-track penalty scan.
 
