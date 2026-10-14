@@ -81,11 +81,11 @@ class DriveScene : public Scene {
 
   // Builds the in-game HUD quads (crash explosion, crack/sinking overlay, race
   // clock, direction arrow/warning, opponent-near indicator, penalty banner) in
-  // pixel coordinates. `car_rect` is the clipped car screen rectangle (left,
-  // top, right, bottom) or nullptr when the car is not visible; it drives the
-  // crash explosion.
+  // pixel coordinates. `car_rect` / `opponent_rect` are the clipped screen
+  // rectangles (left, top, right, bottom) of the two cars or nullptr when a car
+  // is not visible; each drives that car's crash explosion.
   void build_hud(std::vector<Vertex>& verts, int width, int height,
-                 const glm::vec4* car_rect) const;
+                 const glm::vec4* car_rect, const glm::vec4* opponent_rect) const;
 
   // Draws the sky/ground fills and the horizon mountain panorama behind the
   // world (seg003.asm skybox_op / skybox_op_helper2). No-op when the skybox
@@ -120,6 +120,11 @@ class DriveScene : public Scene {
   // false when the box is behind the camera or fully off-screen.
   bool car_screen_rect(const Camera& camera, float alpha, int width, int height,
                        glm::vec4* rect) const;
+
+  // Same projection for the opponent car (frame.c transforms both cars and sizes
+  // each crash explosion from its own rect). Returns false without an opponent.
+  bool opponent_screen_rect(const Camera& camera, float alpha, int width, int height,
+                            glm::vec4* rect) const;
 
   // Interpolated visual pose for the current render frame.
   float render_alpha() const;
@@ -224,6 +229,11 @@ class DriveScene : public Scene {
   glm::vec3 car_bounds_min_{0.0f};
   glm::vec3 car_bounds_max_{0.0f};
   bool car_bounds_valid_ = false;
+  // The same local bounding box for the opponent car, used to size its crash
+  // explosion billboard (frame.c sizes each car's explosion from its own rect).
+  glm::vec3 opponent_bounds_min_{0.0f};
+  glm::vec3 opponent_bounds_max_{0.0f};
+  bool opponent_bounds_valid_ = false;
   Camera camera_;
   Camera camera_prev_;  // camera pose at the previous physics tick
 

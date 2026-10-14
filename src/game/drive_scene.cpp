@@ -229,6 +229,37 @@ glm::mat4 fixed_model_matrix(const fixed::Mat3& rot, const glm::vec3& pos) {
   return model;
 }
 
+// Projects a local-space axis-aligned box through `mvp` to a pixel rectangle
+// clipped to the viewport, mirroring frame.c's transformed-shape rect that
+// sizes the crash explosion. Returns false when the box is behind the camera or
+// entirely off screen.
+bool project_box_rect(const glm::mat4& mvp, const glm::vec3& bmin, const glm::vec3& bmax,
+                      int width, int height, glm::vec4* rect) {
+  if (width <= 0 || height <= 0) return false;
+  glm::vec2 lo(1e30f), hi(-1e30f);
+  for (int i = 0; i < 8; ++i) {
+    const glm::vec3 p((i & 1) ? bmax.x : bmin.x, (i & 2) ? bmax.y : bmin.y,
+                      (i & 4) ? bmax.z : bmin.z);
+    const glm::vec4 clip = mvp * glm::vec4(p, 1.0f);
+    if (clip.w <= 1e-3f) return false;  // behind the camera
+    const glm::vec3 ndc = glm::vec3(clip) / clip.w;
+    const glm::vec2 s((ndc.x * 0.5f + 0.5f) * static_cast<float>(width),
+                      (1.0f - (ndc.y * 0.5f + 0.5f)) * static_cast<float>(height));
+    lo = glm::min(lo, s);
+    hi = glm::max(hi, s);
+  }
+
+  // Clip to the viewport (rect_intersect in the original clipped the car rect to
+  // the windshield/viewport before the explosion picked its centre and size).
+  const float left = std::max(lo.x, 0.0f);
+  const float top = std::max(lo.y, 0.0f);
+  const float right = std::min(hi.x, static_cast<float>(width));
+  const float bottom = std::min(hi.y, static_cast<float>(height));
+  if (right <= left || bottom <= top) return false;
+  *rect = glm::vec4(left, top, right, bottom);
+  return true;
+}
+
 }  // namespace
 
 DriveScene::DriveScene(Track track, std::string asset_dir, std::string car_id,
@@ -608,6 +639,19 @@ void DriveScene::build_opponent_meshes() {
   MeshBuilder mb;
   world::append_car_model(mb, *opponent_lib_, glm::mat4(1.0f), car_color(backlight_off), 0,
                           &opponent_wheel_pose_);
+  // The opponent car local bounding box (used to size its crash explosion
+  // billboard) is captured at the rest pose, like the player's.
+  if (!opponent_bounds_valid_) {
+    const std::vector<Vertex>& verts = mb.vertices();
+    if (!verts.empty()) {
+      opponent_bounds_min_ = opponent_bounds_max_ = verts.front().position;
+      for (const Vertex& v : verts) {
+        opponent_bounds_min_ = glm::min(opponent_bounds_min_, v.position);
+        opponent_bounds_max_ = glm::max(opponent_bounds_max_, v.position);
+      }
+      opponent_bounds_valid_ = true;
+    }
+  }
   opponent_mesh_ = mb.to_mesh();
   MeshBuilder mbb;
   world::append_car_model(mbb, *opponent_lib_, glm::mat4(1.0f), car_color(backlight_on), 0,
@@ -1168,54 +1212,47 @@ bool DriveScene::car_screen_rect(const Camera& camera, float alpha, int width,
   const float aspect = static_cast<float>(width) / static_cast<float>(height);
   const glm::mat4 mvp =
       camera.projection(aspect) * camera.view() * car_model_matrix(alpha);
+  return project_box_rect(mvp, car_bounds_min_, car_bounds_max_, width, height, rect);
+}
 
-  glm::vec2 lo(1e30f), hi(-1e30f);
-  for (int i = 0; i < 8; ++i) {
-    const glm::vec3 p((i & 1) ? car_bounds_max_.x : car_bounds_min_.x,
-                      (i & 2) ? car_bounds_max_.y : car_bounds_min_.y,
-                      (i & 4) ? car_bounds_max_.z : car_bounds_min_.z);
-    const glm::vec4 clip = mvp * glm::vec4(p, 1.0f);
-    if (clip.w <= 1e-3f) return false;  // behind the camera
-    const glm::vec3 ndc = glm::vec3(clip) / clip.w;
-    const glm::vec2 s((ndc.x * 0.5f + 0.5f) * static_cast<float>(width),
-                      (1.0f - (ndc.y * 0.5f + 0.5f)) * static_cast<float>(height));
-    lo = glm::min(lo, s);
-    hi = glm::max(hi, s);
-  }
-
-  // Clip to the viewport (rect_intersect in the original clipped the car rect to
-  // the windshield/viewport before the explosion picked its centre and size).
-  const float left = std::max(lo.x, 0.0f);
-  const float top = std::max(lo.y, 0.0f);
-  const float right = std::min(hi.x, static_cast<float>(width));
-  const float bottom = std::min(hi.y, static_cast<float>(height));
-  if (right <= left || bottom <= top) return false;
-  *rect = glm::vec4(left, top, right, bottom);
-  return true;
+bool DriveScene::opponent_screen_rect(const Camera& camera, float alpha, int width,
+                                      int height, glm::vec4* rect) const {
+  // frame.c transforms both cars and sizes each explosion from its own rect, so
+  // the opponent's billboard projects its bounding box exactly like the player's.
+  if (!have_opponent_ || !opponent_bounds_valid_ || width <= 0 || height <= 0) return false;
+  const float aspect = static_cast<float>(width) / static_cast<float>(height);
+  const glm::mat4 mvp =
+      camera.projection(aspect) * camera.view() * opponent_model_matrix(alpha);
+  return project_box_rect(mvp, opponent_bounds_min_, opponent_bounds_max_, width, height, rect);
 }
 
 void DriveScene::build_hud(std::vector<Vertex>& verts, int width, int height,
-                           const glm::vec4* car_rect) const {
+                           const glm::vec4* car_rect, const glm::vec4* opponent_rect) const {
   const int scale = std::max(1, height / 200);
 
   // Crash explosion (frame.c shape_op_explosion): a crashed car that is still on
   // screen blinks through ex01/ex02/ex03, one shape per 4 game frames, scaled so
   // its width fills the longer side of the (viewport-clipped) car rectangle. The
   // sprite's pivot pixel lands on the rectangle centre. Drawn first, before the
-  // crack overlay and the in-game text (frame.c order).
-  if (car_.car_crashBmpFlag == physics::kCrashEventCollision && car_rect != nullptr) {
-    const int di = (game_frame_ >> 2) % 3;
+  // crack overlay and the in-game text (frame.c order). The original loops over
+  // both cars (si = 0 player, 1 opponent), so the opponent gets its own billboard
+  // at its own screen rectangle.
+  const int di = (game_frame_ >> 2) % 3;
+  const auto append_explosion = [&](const glm::vec4* rect) {
     const Sprite2D& ex = explosion_[di];
-    if (ex.valid()) {
-      const float left = car_rect->x, top = car_rect->y;
-      const float right = car_rect->z, bottom = car_rect->w;
-      const float idx = std::max(right - left, bottom - top);
-      const float cx = (left + right) * 0.5f;
-      const float cy = (top + bottom) * 0.5f;
-      const float pix = idx / static_cast<float>(ex.width);
-      append_sprite(verts, ex, palette_, cx - static_cast<float>(ex.pivot_x) * pix,
-                    cy - static_cast<float>(ex.pivot_y) * pix, pix);
-    }
+    if (rect == nullptr || !ex.valid()) return;
+    const float left = rect->x, top = rect->y;
+    const float right = rect->z, bottom = rect->w;
+    const float idx = std::max(right - left, bottom - top);
+    const float cx = (left + right) * 0.5f;
+    const float cy = (top + bottom) * 0.5f;
+    const float pix = idx / static_cast<float>(ex.width);
+    append_sprite(verts, ex, palette_, cx - static_cast<float>(ex.pivot_x) * pix,
+                  cy - static_cast<float>(ex.pivot_y) * pix, pix);
+  };
+  if (car_.car_crashBmpFlag == physics::kCrashEventCollision) append_explosion(car_rect);
+  if (have_opponent_ && opponent_.car_crashBmpFlag == physics::kCrashEventCollision) {
+    append_explosion(opponent_rect);
   }
 
   // Crashed-windscreen overlay (seg003.asm init_crak). The original draws it
@@ -1661,9 +1698,13 @@ void DriveScene::render(Renderer& renderer, int width, int height) {
   glm::vec4 car_rect;
   const bool has_car_rect =
       car_screen_rect(render_cam, alpha, width, height, &car_rect);
+  glm::vec4 opponent_rect;
+  const bool has_opponent_rect =
+      opponent_screen_rect(render_cam, alpha, width, height, &opponent_rect);
 
   std::vector<Vertex> hud;
-  build_hud(hud, width, height, has_car_rect ? &car_rect : nullptr);
+  build_hud(hud, width, height, has_car_rect ? &car_rect : nullptr,
+            has_opponent_rect ? &opponent_rect : nullptr);
   hud_.draw(hud, width, height);
 
   // The cockpit panel goes last so it masks the world and HUD outside the
