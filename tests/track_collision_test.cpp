@@ -293,6 +293,75 @@ TEST(track_collision_build_object_bound_track_matches_explicit_track) {
 }
 
 // ---------------------------------------------------------------------------
+// Slalom and scenery walls (code_bto_slalom / code_bto_barn / ...)
+// ---------------------------------------------------------------------------
+TEST(track_collision_build_object_slalom_gate_wall) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  Track t = empty_track();
+  set_item(&t, 3, 4, 115);  // item 115: slalom, rot 0, physical model 34
+  tc.set_track(&t);
+
+  const int cx = 3 * 1024 + 512;
+  const int cz = 4 * 1024 + 512;
+  CollisionSample s;
+  // vx = 0x30 is inside the post's x band, vz = -0x100 inside the z band; the
+  // next z falls past the band's lower edge, selecting wall 0x91.
+  tc.build_track_object(word_pos(cx + 0x30, 0, cz - 0x100),
+                        word_pos(cx + 0x30, 0, cz - 0x200), &s);
+  EXPECT_EQ(s.physical_model, 34);
+  EXPECT_EQ(s.wall_index, 0x91);
+  EXPECT_EQ(s.wall_height, 0x2A);
+  EXPECT_EQ(s.surface_type, static_cast<int8_t>(CarSurfaceType::Paved));
+
+  // Driving through the gap (next z still inside the band) hits nothing.
+  tc.build_track_object(word_pos(cx + 0x30, 0, cz - 0x100),
+                        word_pos(cx + 0x30, 0, cz - 0x100), &s);
+  EXPECT_EQ(s.wall_index, -1);
+}
+
+TEST(track_collision_build_object_scenery_building_wall) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  Track t = empty_track();
+  set_item(&t, 5, 6, 159);  // item 159: barn, physical model 65
+  tc.set_track(&t);
+
+  const int cx = 5 * 1024 + 512;
+  const int cz = 6 * 1024 + 512;
+  CollisionSample s;
+  // Wheel at the cell centre; a next position past the -z face -> wall 0xA1.
+  tc.build_track_object(word_pos(cx, 0, cz), word_pos(cx, 0, cz - 0x100), &s);
+  EXPECT_EQ(s.physical_model, 65);
+  EXPECT_EQ(s.wall_index, 0xA1);
+  EXPECT_EQ(s.wall_height, 0x1A9);
+}
+
+TEST(track_collision_build_object_scenery_pine_has_no_wall) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  Track t = empty_track();
+  set_item(&t, 5, 6, 153);  // item 153: pine, physical model 71 (blank handler)
+  tc.set_track(&t);
+
+  const int cx = 5 * 1024 + 512;
+  const int cz = 6 * 1024 + 512;
+  CollisionSample s;
+  tc.build_track_object(word_pos(cx, 0, cz), word_pos(cx, 0, cz - 0x100), &s);
+  EXPECT_EQ(s.physical_model, 71);
+  EXPECT_EQ(s.wall_index, -1);
+}
+
+// ---------------------------------------------------------------------------
 // Real track sanity check
 // ---------------------------------------------------------------------------
 TEST(track_collision_build_object_real_track_road_cell) {

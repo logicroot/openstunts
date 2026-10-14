@@ -55,6 +55,29 @@ enum PhysModel {
   PHYS_BANK_ENTRANCE_A = 24,
   PHYS_BANK_ROAD = 25,
   PHYS_BANK_CORNER = 26,
+  PHYS_LOOP = 27,
+  PHYS_TUNNEL = 28,
+  PHYS_PIPE_ENTRANCE = 29,
+  PHYS_PIPE = 30,
+  PHYS_HALF_PIPE = 31,
+  PHYS_CORK_UD_LH = 32,
+  PHYS_CORK_UD_RH = 33,
+  PHYS_SLALOM = 34,
+  PHYS_CORK_LR = 35,
+  // 64..74: scenery objects and the "empty" cell (blank handler). Only the
+  // buildings up to code_bto_ship (70) emit walls; pine/cactus/tennis/palm use
+  // code_bto_blank.
+  PHYS_EMPTY = 64,
+  PHYS_BARN = 65,
+  PHYS_GAS_STATION = 66,
+  PHYS_JOES = 67,
+  PHYS_OFFICE = 68,
+  PHYS_WINDMILL = 69,
+  PHYS_SHIP = 70,
+  PHYS_PINE = 71,
+  PHYS_CACTUS = 72,
+  PHYS_TENNIS = 73,
+  PHYS_PALM = 74,
 };
 
 int16_t s16_wrap(int v) { return static_cast<int16_t>(static_cast<uint16_t>(v & 0xFFFF)); }
@@ -621,6 +644,128 @@ void TrackCollision::build_track_object_from_track(const s3d::Track& track,
         if (turn > 0x66) {
           wall_orient_mod = kOrient180;
           wallindex = wallsel + 0x7B;
+        }
+        break;
+      }
+      // ---- Slalom (code_bto_slalom) --------------------------------------
+      case PHYS_SLALOM: {
+        if (abs_x < 0x78) set_pavement();
+        // Gate post lying across z: inner x band and a narrow z band.
+        if (vx >= 0x17 && vx <= 0x61 && vz > static_cast<int16_t>(0xFEF1) &&
+            vz < static_cast<int16_t>(0xFF0F)) {
+          wall_height = 0x2A;
+          if (nvz < static_cast<int16_t>(0xFEF1)) {
+            wallindex = 0x91;
+          } else if (nvz > static_cast<int16_t>(0xFF0F)) {
+            wallindex = 0x92;
+          } else if (nvx < 0x17) {
+            wallindex = 0x94;
+          } else if (nvx > 0x61) {
+            wallindex = 0x93;
+          }
+          break;
+        }
+        // Gate post lying across x (the other slalom orientation).
+        if (vx > static_cast<int16_t>(0xFFE9)) break;
+        if (vx < static_cast<int16_t>(0xFF9F)) break;
+        if (vz >= 0x10F) break;
+        if (vz <= 0xF1) break;
+        wall_height = 0x2A;
+        if (nvz > 0x10F) {
+          wallindex = 0x8D;
+        } else if (nvz < 0xF1) {
+          wallindex = 0x8E;
+        } else if (nvx > static_cast<int16_t>(0xFFE9)) {
+          wallindex = 0x8F;
+        } else if (nvx < static_cast<int16_t>(0xFF9F)) {
+          wallindex = 0x90;
+        }
+        break;
+      }
+      // ---- Scenery buildings ---------------------------------------------
+      // Each is a rectangular footprint that rejects the wheel unless it is
+      // inside, then picks the wall facing the wheel's next position.
+      case PHYS_BARN: {
+        if (abs_x > 0x96 || abs_z > 0x96) break;
+        wall_height = 0x1A9;
+        if (nvz <= static_cast<int16_t>(0xFF6A)) {
+          wallindex = 0xA1;
+        } else if (nvz >= 0x96) {
+          wallindex = 0xA2;
+        } else if (nvx >= 0x96) {
+          wallindex = 0xA3;
+        } else if (nvx <= static_cast<int16_t>(0xFF6A)) {
+          wallindex = 0xA4;
+        }
+        break;
+      }
+      case PHYS_GAS_STATION: {
+        if (vx < static_cast<int16_t>(0xFF38) || vx > 0x104 || abs_z > 0x50) break;
+        wall_height = 0xE6;
+        if (nvz <= static_cast<int16_t>(0xFFB0)) {
+          wallindex = 0xA5;
+        } else if (nvz >= 0x50) {
+          wallindex = 0xA8;
+        } else if (nvx <= static_cast<int16_t>(0xFF38)) {
+          wallindex = 0xA6;
+        } else if (nvx >= 0x104) {
+          wallindex = 0xA7;
+        }
+        break;
+      }
+      case PHYS_JOES: {
+        if (abs_x > 0xB4 || abs_z > 0x64) break;
+        wall_height = 0xF8;
+        if (nvz <= static_cast<int16_t>(0xFF9C)) {
+          wallindex = 0xA9;
+        } else if (nvz >= 0x64) {
+          wallindex = 0xAC;
+        } else if (nvx <= static_cast<int16_t>(0xFF4C)) {
+          wallindex = 0xAB;
+        } else if (nvx >= 0xB4) {
+          wallindex = 0xAA;
+        }
+        break;
+      }
+      case PHYS_OFFICE: {
+        if (abs_x > 0xC8 || abs_z > 0xC8) break;
+        wall_height = 0x226;
+        if (nvz <= static_cast<int16_t>(0xFF38)) {
+          wallindex = 0xAD;
+        } else if (nvz >= 0xC8) {
+          wallindex = 0xAE;
+        } else if (nvx <= static_cast<int16_t>(0xFF38)) {
+          wallindex = 0xAF;
+        } else if (nvx >= 0xC8) {
+          wallindex = 0xB0;
+        }
+        break;
+      }
+      case PHYS_WINDMILL: {
+        if (abs_x > 0x72 || abs_z > 0x72) break;
+        wall_height = 0x1EF;
+        if (nvz <= static_cast<int16_t>(0xFF8E)) {
+          wallindex = 0xB4;
+        } else if (nvz >= 0x72) {
+          wallindex = 0xB2;
+        } else if (nvx <= static_cast<int16_t>(0xFF8E)) {
+          wallindex = 0xB1;
+        } else if (nvx >= 0x72) {
+          wallindex = 0xB3;
+        }
+        break;
+      }
+      case PHYS_SHIP: {
+        if (vx < static_cast<int16_t>(0xFF56) || vx > 0x104 || abs_z > 0x6E) break;
+        wall_height = 0xE6;
+        if (nvz <= static_cast<int16_t>(0xFF92)) {
+          wallindex = 0xB5;
+        } else if (nvz >= 0x6E) {
+          wallindex = 0xB8;
+        } else if (nvx <= static_cast<int16_t>(0xFF56)) {
+          wallindex = 0xB7;
+        } else if (nvx >= 0x104) {
+          wallindex = 0xB6;
         }
         break;
       }
