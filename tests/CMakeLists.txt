@@ -20,6 +20,7 @@ add_executable(s3d_tests
   opponent_ai_test.cpp
   car_debris_test.cpp
   track_collision_test.cpp
+  ramp_jump_test.cpp
   font_test.cpp
   sprite2d_test.cpp
   crash_overlay_test.cpp

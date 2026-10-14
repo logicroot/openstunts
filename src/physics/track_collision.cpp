@@ -180,8 +180,12 @@ bool TrackCollision::load_from_game_pre(const std::string& game_pre_path) {
     planes_[i].plane_normal.x = r16(10);
     planes_[i].plane_normal.y = r16(12);
     planes_[i].plane_normal.z = r16(14);
-    for (int j = 0; j < 9; ++j) {
-      planes_[i].plane_rotation.m[j] = r16(16 + j * 2);
+    // Stored as the original's MATRIX, whose array is column-major
+    // (_11,_21,_31,_12,...). Our Mat3 is row-major, so transpose on load.
+    for (int row = 0; row < 3; ++row) {
+      for (int col = 0; col < 3; ++col) {
+        planes_[i].plane_rotation.m[row * 3 + col] = r16(16 + (col * 3 + row) * 2);
+      }
     }
   }
 

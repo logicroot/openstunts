@@ -152,6 +152,28 @@ TEST(track_collision_transform_flat_plane_keeps_travel) {
   EXPECT_EQ(out.z, 100);
 }
 
+TEST(track_collision_transform_tilted_plane_follows_slope) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  // Plane 12 is the rot-0 ramp: it rises along +z (normal (0, 7499, -3295)).
+  // GAME.PRE stores the plane rotation column-major, so the loader has to
+  // transpose it; travel along the slope must gain +y, not sink into the ramp.
+  // With the wheel heading and car yaw zero and car pitch == plane_xy, the
+  // travel is rotated by the plane rotation alone.
+  const fixed::Mat3 identity;
+  fixed::Vec3 out;
+  tc.transform_wheel_travel_to_world(100, 0, identity, 0, 67, 0, 12, &out);
+  EXPECT_EQ(out.x, 0);
+  EXPECT_TRUE(out.y > 0);  // climbing the slope
+  EXPECT_TRUE(out.z > 0);
+  // Plane forward (0, 0.3996, 0.9167) * 100 -> about (0, 39, 91).
+  EXPECT_TRUE(out.y >= 35 && out.y <= 43);
+  EXPECT_TRUE(out.z >= 88 && out.z <= 94);
+}
+
 // ---------------------------------------------------------------------------
 // build_track_object (seg004.asm)
 // ---------------------------------------------------------------------------

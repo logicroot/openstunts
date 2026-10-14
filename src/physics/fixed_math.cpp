@@ -170,8 +170,8 @@ void mat_rot_x(int angle, Mat3* out) {
   const int c = cos_fast(static_cast<unsigned short>(angle));
   const int s = sin_fast(static_cast<unsigned short>(angle));
   out->m[0] = 0x4000; out->m[1] = 0;           out->m[2] = 0;
-  out->m[3] = 0;      out->m[4] = c;           out->m[5] = s;
-  out->m[6] = 0;      out->m[7] = -s;          out->m[8] = c;
+  out->m[3] = 0;      out->m[4] = c;           out->m[5] = -s;
+  out->m[6] = 0;      out->m[7] = s;           out->m[8] = c;
 }
 
 void mat_rot_y(int angle, Mat3* out) {
@@ -196,15 +196,19 @@ Mat3 mat_rot_zxy(int z, int x, int y, int unk) {
   mat_rot_x(x, &mx);
   mat_rot_y(y, &my);
 
+  // The original's MATRIX stores its columns contiguously (math.h `vals[]` is
+  // _11,_21,_31,_12,...), so its mat_multiply(A, B) yields B*A in row-major
+  // terms. Composing through our row-major multiply therefore swaps the
+  // operands: mat_rot_zxy(z, x, y) must produce my*mx*mz (apply z, then x,
+  // then y), which is what the original returns.
+  Mat3 result;
   if ((unk & 1) != 0) {
-    mat_multiply(my, mx, &tmp);
-    Mat3 result;
-    mat_multiply(tmp, mz, &result);
+    mat_multiply(mx, my, &tmp);
+    mat_multiply(mz, tmp, &result);
     return result;
   }
-  mat_multiply(mz, mx, &tmp);
-  Mat3 result;
-  mat_multiply(tmp, my, &result);
+  mat_multiply(mx, mz, &tmp);
+  mat_multiply(my, tmp, &result);
   return result;
 }
 
