@@ -128,3 +128,5 @@ jobs:
           files: artifacts/*
           generate_release_notes: true
           fail_on_unmatched_files: true
+          # The project is alpha; mark tagged builds as pre-releases.
+          prerelease: true
