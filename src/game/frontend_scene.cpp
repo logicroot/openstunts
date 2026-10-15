@@ -32,6 +32,10 @@ namespace {
 constexpr const char* kDemoTrack = "HELENS.TRK";
 constexpr const char* kDemoCar = "PMIN";
 
+// How many drivers the Opponent screen can cycle through (OPP1..OPP6); index 0
+// is always Race against the Clock.
+constexpr int kOpponentSlots = 6;
+
 // A 4-character car id from a CAR*.RES name.
 std::string car_id_from_file(const std::string& file) {
   if (file.size() <= 7) return {};
@@ -231,13 +235,9 @@ void FrontEndScene::build_menu() {
       break;
     }
     case Screen::kOpponent: {
-      items.push_back({"Race against the Clock"});
-      for (int i = 1; i <= 6; ++i) {
-        ui::MenuItem it;
-        it.label = "Opponent " + std::to_string(i);
-        if (config_ != nullptr && config_->opponent_type == i) it.label += "  *";
-        items.push_back(std::move(it));
-      }
+      // Like the Car screen: the drivers are not a list. The face shows the
+      // current opponent and Last/Next walk through them, "Clock" is the
+      // Race-against-the-Clock shortcut.
       items.push_back({"Last"});
       items.push_back({"Next"});
       items.push_back({"Clock"});
@@ -357,6 +357,31 @@ void FrontEndScene::cycle_car(int delta) {
   ensure_car_preview();
 }
 
+// The opponent choice is an index: 0 is "Race against the Clock" (no opponent,
+// which the race scene represents with an empty opponent car) and 1..6 pick a
+// driver, which also selects that driver's route in OPPn.PRE.
+int FrontEndScene::current_opponent_index() const {
+  if (config_ == nullptr || config_->opponent_car.empty()) return 0;
+  return std::clamp(config_->opponent_type, 1, kOpponentSlots);
+}
+
+void FrontEndScene::set_opponent(int index) {
+  if (config_ == nullptr) return;
+  const int slots = kOpponentSlots + 1;
+  index = ((index % slots) + slots) % slots;
+  if (index == 0) {
+    config_->opponent_car.clear();
+  } else {
+    config_->opponent_type = index;
+    if (config_->opponent_car.empty()) config_->opponent_car = config_->player_car;
+  }
+  ensure_opponent_face();
+}
+
+void FrontEndScene::cycle_opponent(int delta) {
+  set_opponent(current_opponent_index() + delta);
+}
+
 void FrontEndScene::activate() {
   const int row = menu_.selected();
   switch (screen_) {
@@ -400,40 +425,15 @@ void FrontEndScene::activate() {
     }
 
     case Screen::kOpponent: {
-      if (row == 0) {  // Race against the Clock
-        if (config_ != nullptr) config_->opponent_car.clear();
-      } else if (row >= 1 && row <= 6) {
-        if (config_ != nullptr) {
-          config_->opponent_type = row;
-          if (config_->opponent_car.empty()) config_->opponent_car = config_->player_car;
-        }
-      } else if (row == 7) {  // Last
-        int t = config_ ? config_->opponent_type : 1;
-        t = t <= 1 ? 6 : t - 1;
-        if (config_ != nullptr) {
-          config_->opponent_type = t;
-          if (config_->opponent_car.empty()) config_->opponent_car = config_->player_car;
-        }
-        build_menu();
-        ensure_opponent_face();
-      } else if (row == 8) {  // Next
-        int t = config_ ? config_->opponent_type : 1;
-        t = t >= 6 ? 1 : t + 1;
-        if (config_ != nullptr) {
-          config_->opponent_type = t;
-          if (config_->opponent_car.empty()) config_->opponent_car = config_->player_car;
-        }
-        build_menu();
-        ensure_opponent_face();
-      } else if (row == 9) {  // Clock
-        if (config_ != nullptr) config_->opponent_car.clear();
-        build_menu();
-        ensure_opponent_face();
-      } else if (row == 10) {  // Car -> the Car screen, editing the opponent's car
-        car_target_ = CarTarget::kOpponent;
-        set_screen(Screen::kCar);
-      } else {  // Done
-        go_back();
+      switch (row) {
+        case 0: cycle_opponent(-1); break;  // Last
+        case 1: cycle_opponent(1); break;   // Next
+        case 2: set_opponent(0); break;     // Clock = race against the clock
+        case 3:                             // Car: edit the opponent's car
+          car_target_ = CarTarget::kOpponent;
+          set_screen(Screen::kCar);
+          break;
+        default: go_back(); break;          // Done
       }
       break;
     }
@@ -571,12 +571,9 @@ void FrontEndScene::ensure_car_preview() {
 }
 
 void FrontEndScene::ensure_opponent_face() {
-  // On an opponent row the cursor previews that driver; on a control row
-  // ("Last"/"Next"/"Clock"/"Car"/"Done") follow the chosen opponent_type.
-  const int row = menu_.selected();
-  int want = (row >= 0 && row <= 6) ? row
-                                    : (config_ != nullptr ? config_->opponent_type : 1);
-  if (want < 0 || want > 6) want = 1;
+  // The face follows the chosen opponent (default: Race against the Clock),
+  // not the menu cursor.
+  const int want = current_opponent_index();
   if (face_texture_.valid() && want == face_index_) return;
   if (!have_palette_) return;
 

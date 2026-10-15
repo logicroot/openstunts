@@ -69,9 +69,13 @@ class FrontEndScene : public Scene {
   void on_selection_changed();
   void activate();
   void go_back();
-  // Advance the player's or opponent's car selection by `delta` (wrapping) and
-  // move the menu cursor onto it.
+  // Advance the player's or opponent's car selection by `delta` (wrapping).
   void cycle_car(int delta);
+  // Opponent choice: index 0 is Race against the Clock, 1..kOpponentSlots pick
+  // a driver. Last/Next step through them; the face view follows the choice.
+  int current_opponent_index() const;
+  void set_opponent(int index);
+  void cycle_opponent(int delta);
   // Apply a Left/Right change on the current row (called after menu_.adjust).
   void apply_value(int row);
 
