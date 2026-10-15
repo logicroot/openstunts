@@ -175,6 +175,65 @@ TEST(track_collision_transform_tilted_plane_follows_slope) {
 }
 
 // ---------------------------------------------------------------------------
+// plane_push_out (seg001.asm loc_15C04 wheel penetration correction)
+// ---------------------------------------------------------------------------
+TEST(track_collision_plane_push_out_no_plane_is_vertical) {
+  // Without a valid plane the correction is the plain vertical push:
+  // (0, -distance << 6, 0) with an identity rotation.
+  TrackCollision tc;
+  fixed::Vec3 out;
+  tc.plane_push_out(-1, -100, &out);
+  EXPECT_EQ(out.x, 0);
+  EXPECT_EQ(out.y, 6400);
+  EXPECT_EQ(out.z, 0);
+}
+
+TEST(track_collision_plane_push_out_flat_plane_is_vertical) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  // Planes 0..3 are the flat ground planes with an identity rotation, so the
+  // correction must stay exactly vertical - the old behaviour.
+  fixed::Vec3 out;
+  tc.plane_push_out(0, -100, &out);
+  EXPECT_EQ(out.x, 0);
+  EXPECT_EQ(out.y, 6400);
+  EXPECT_EQ(out.z, 0);
+}
+
+TEST(track_collision_plane_push_out_follows_a_slope) {
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no Stunts asset dir / GAME.PRE)\n");
+    return;
+  }
+  // Plane 16 is a terrain slope (normal (3057, 6957, -3057)). Pushing straight
+  // up would leave a vertical slice of the penetration uncorrected; the
+  // reference rotates the push by the plane's rotation matrix, so the result
+  // points along the plane's own up axis and keeps its length.
+  fixed::Vec3 out;
+  tc.plane_push_out(16, -100, &out);
+  EXPECT_TRUE(out.y > 0);
+  EXPECT_TRUE(out.x > 0);     // matches the normal's +x
+  EXPECT_TRUE(out.z < 0);     // and its -z
+  EXPECT_TRUE(out.y < 6400);  // the normal is tilted, so less than a full push
+  const long length_sq = static_cast<long>(out.x) * out.x +
+                         static_cast<long>(out.y) * out.y +
+                         static_cast<long>(out.z) * out.z;
+  EXPECT_TRUE(length_sq >= 6390L * 6390L && length_sq <= 6410L * 6410L);
+
+  // The correction is parallel to the stored plane normal (both are the plane's
+  // up axis): the cross product components vanish up to fixed-point rounding.
+  const Plane& p = tc.planes()[16];
+  EXPECT_TRUE(std::abs(static_cast<long>(out.x) * p.plane_normal.y -
+                       static_cast<long>(out.y) * p.plane_normal.x) < 250000L);
+  EXPECT_TRUE(std::abs(static_cast<long>(out.y) * p.plane_normal.z -
+                       static_cast<long>(out.z) * p.plane_normal.y) < 250000L);
+}
+
+// ---------------------------------------------------------------------------
 // build_track_object (seg004.asm)
 // ---------------------------------------------------------------------------
 TEST(track_collision_build_object_needs_bound_track) {

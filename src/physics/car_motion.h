@@ -8,8 +8,9 @@
 // reduced model uses a caller-supplied 2D ground sampler by default; when a
 // loaded TrackCollision is passed it instead resolves the active track plane
 // under each wheel (ramps, banked roads, elevated terrain) via
-// build_track_object / plane_signed_distance and travels along it via
-// transform_wheel_travel_to_world. Wall collisions are resolved by sweeping
+// build_track_object / plane_signed_distance, travels along it via
+// transform_wheel_travel_to_world and pushes penetration back out along the
+// plane's own up axis (plane_push_out). Wall collisions are resolved by sweeping
 // each wheel across the active wall (resolve_wall_contact); a hard enough hit
 // enters the crash state (compute_wall_crash). Loop/banked steering is still
 // deferred.

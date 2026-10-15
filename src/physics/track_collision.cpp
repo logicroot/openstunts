@@ -225,6 +225,29 @@ int TrackCollision::plane_signed_distance(int plane_index, int x, int y, int z, 
   return fixed::vec_normal_inner_product(ax, ay, az, plane.plane_normal);
 }
 
+void TrackCollision::plane_push_out(int plane_index, int16_t distance,
+                                    fixed::Vec3* out) const {
+  if (out == nullptr) return;
+  // seg001.asm loc_15C04..loc_15CBE. The correction starts as the vertical
+  // vector (0, -distance << 6, 0): `distance` is in word units and the wheel
+  // positions are in 1/64-word units, so the shift converts between them. The
+  // original performs both the negate and the shift in 16 bits, so keep the
+  // int16 wraparound. It is then rotated by the active plane's rotation matrix
+  // (the same matrix `transform_wheel_travel_to_world` uses), turning the push
+  // into the plane's own up axis. Flat planes have an identity rotation, so the
+  // result there is exactly the vertical vector.
+  constexpr int kWorldToLongShift = 6;
+  const fixed::Vec3 local{
+      0,
+      static_cast<int16_t>(static_cast<uint16_t>(wrap_negate(distance)) << kWorldToLongShift),
+      0};
+  if (plane_index < 0 || static_cast<size_t>(plane_index) >= planes_.size()) {
+    *out = local;
+    return;
+  }
+  fixed::mat_mul_vector(local, planes_[plane_index].plane_rotation, out);
+}
+
 void TrackCollision::transform_wheel_travel_to_world(int16_t travel, int16_t wheel_heading,
                                                      const fixed::Mat3& car_to_world, int16_t car_yaw,
                                                      int16_t car_pitch, int16_t car_roll,

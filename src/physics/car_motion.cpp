@@ -301,8 +301,8 @@ void step_car_motion(CarState* car, const CarSpec& spec, int frames_per_sec,
   // back to the 2D sampler.
   const bool use_track_collision =
       collision != nullptr && collision->is_loaded() && collision->track() != nullptr;
-  auto sample_wheel_ground = [&](int wheel_x, int wheel_y, int wheel_z,
-                                 int16_t* distance_out) -> int8_t {
+  auto sample_wheel_ground = [&](int wheel_x, int wheel_y, int wheel_z, int16_t* distance_out,
+                                 int16_t* plane_out) -> int8_t {
     if (use_track_collision) {
       const fixed::Vec3 word{static_cast<int16_t>(wheel_x), static_cast<int16_t>(wheel_y),
                              static_cast<int16_t>(wheel_z)};
@@ -311,10 +311,12 @@ void step_car_motion(CarState* car, const CarSpec& spec, int frames_per_sec,
       *distance_out = static_cast<int16_t>(collision->plane_signed_distance(
           sample.plane_index, wheel_x, wheel_y, wheel_z, sample.terrain_height,
           sample.elem_x_center, sample.elem_z_center));
+      *plane_out = sample.plane_index;
       return sample.surface_type;
     }
     const GroundSample sampled = ground(wheel_x, wheel_z);
     *distance_out = static_cast<int16_t>(wheel_y - sampled.height);
+    *plane_out = -1;  // the flat 2D sampler has no plane; push straight up
     return static_cast<int8_t>(sampled.surface);
   };
 
@@ -442,7 +444,8 @@ void step_car_motion(CarState* car, const CarSpec& spec, int frames_per_sec,
     const int wheel_z = static_cast<int>(current[i].z >> kWorldToLongShift);
     int wheel_y = static_cast<int>(current[i].y >> kWorldToLongShift);
     int16_t distance = 0;
-    int8_t surface = sample_wheel_ground(wheel_x, wheel_y, wheel_z, &distance);
+    int16_t plane = -1;
+    int8_t surface = sample_wheel_ground(wheel_x, wheel_y, wheel_z, &distance, &plane);
 
     if (distance > 0) {
       // Airborne: accelerate the wheel downward (one native step), then re-test
@@ -452,7 +455,7 @@ void step_car_motion(CarState* car, const CarSpec& spec, int frames_per_sec,
           wrap_add(car->car_wheel_vertical_speed[i], kGravityStep[i]);
       current[i].y = wrap_sub32(current[i].y, car->car_wheel_vertical_speed[i]);
       wheel_y = static_cast<int>(current[i].y >> kWorldToLongShift);
-      surface = sample_wheel_ground(wheel_x, wheel_y, wheel_z, &distance);
+      surface = sample_wheel_ground(wheel_x, wheel_y, wheel_z, &distance, &plane);
       if (distance > kContactDistanceLimit) {
         car->car_surfaceWhl[i] = kWheelContactNone;
       } else {
@@ -462,10 +465,22 @@ void step_car_motion(CarState* car, const CarSpec& spec, int frames_per_sec,
       car->car_surfaceWhl[i] = surface;
     }
 
-    // Penetration: push the wheel back out of the ground.
+    // Penetration: push the wheel back out of the ground along the active
+    // plane's own up axis (seg001.asm loc_15C04). Flat planes carry an identity
+    // rotation, so this is the plain vertical push there; on a slope it follows
+    // the surface instead of leaving the vertical slice of the penetration
+    // uncorrected.
     if (distance < 0) {
-      current[i].y = wrap_sub32(current[i].y, static_cast<int32_t>(distance)
-                                                    << kWorldToLongShift);
+      if (plane >= 0 && collision != nullptr) {
+        fixed::Vec3 push;
+        collision->plane_push_out(plane, distance, &push);
+        current[i].x = wrap_add32(current[i].x, push.x);
+        current[i].y = wrap_add32(current[i].y, push.y);
+        current[i].z = wrap_add32(current[i].z, push.z);
+      } else {
+        current[i].y = wrap_sub32(current[i].y, static_cast<int32_t>(distance)
+                                                      << kWorldToLongShift);
+      }
     }
 
     // The suspension spring sees the signed distance before the push-out

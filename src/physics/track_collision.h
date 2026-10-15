@@ -91,6 +91,14 @@ class TrackCollision {
   int plane_signed_distance(int plane_index, int x, int y, int z, int terrain_height,
                             int elem_x_center, int elem_z_center) const;
 
+  // Ported from the wheel penetration correction (seg001.asm loc_15C04):
+  // builds (0, -distance << 6, 0) and rotates it by the active plane's rotation
+  // matrix, so a sloped plane pushes the wheel out along its own up axis rather
+  // than straight up. Flat planes carry an identity rotation, so this reduces to
+  // the plain vertical push there. `distance` is the signed plane distance; only
+  // its negative (penetrating) values are meaningful here.
+  void plane_push_out(int plane_index, int16_t distance, fixed::Vec3* out) const;
+
   // Ported from math.c `plane_rotate_op`: rotates a wheel travel vector
   // (0, 0, travel) into world space, honoring the active plane (or the no-plane
   // fallback when `plane_index < 0`). `car_yaw/pitch/roll` are 1/1024-turn.
