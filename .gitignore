@@ -11,3 +11,7 @@ compile_commands.json
 *.exe
 reference/
 third_party/glm/.git
+
+# release packaging output (see .github/workflows/build.yml)
+/dist/
+/OpenStunts-*

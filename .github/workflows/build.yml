@@ -1,0 +1,160 @@
+name: build
+
+# Native builds on each OS: GitHub-hosted runners are just VMs, so the way to
+# get Windows/Linux/macOS binaries is to compile on each platform in parallel
+# and publish the results. Push a tag (v0.1.0) to also attach the archives to a
+# GitHub release. Nothing is cross-compiled.
+
+on:
+  push:
+    branches: [master, main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # NOTE: the Linux binary links the runner's glibc, so it needs an
+          # equal-or-newer glibc on the target machine. For wider compatibility
+          # pin an older image (e.g. ubuntu-22.04) or build in a manylinux
+          # container.
+          - name: linux-x86_64
+            os: ubuntu-latest
+          - name: windows-x64
+            os: windows-latest
+          - name: macos-arm64
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---- dependencies: SDL2 + OpenGL, per OS ------------------------------
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev libgl1-mesa-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        # dylibbundler copies SDL2 into the archive and rewrites the install
+        # name, so the .zip does not depend on a Homebrew install.
+        run: brew install sdl2 dylibbundler
+
+      - name: Install dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        # vcpkg ships with the Windows runner image.
+        run: vcpkg install sdl2:x64-windows
+
+      # ---- configure + build ------------------------------------------------
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Configure (macOS)
+        if: runner.os == 'macOS'
+        # Point CMake at Homebrew's sdl2 in case the formula is keg-only.
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_PREFIX_PATH="$(brew --prefix sdl2)"
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >
+          cmake -S . -B build
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        # CMake copies assets/ next to each executable here (POST_BUILD).
+        run: cmake --build build --config Release --parallel
+
+      # ---- test -------------------------------------------------------------
+      # The suite is headless (no GL context is created), so no virtual display
+      # is needed, and it runs against the bundled assets in build/tests/assets.
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      # ---- package: game + s3d_dump + assets, self-contained ----------------
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist/OpenStunts
+          cp build/stunts3d build/s3d_dump dist/OpenStunts/
+          cp -r build/assets dist/OpenStunts/assets
+          cp README.md dist/OpenStunts/
+          tar -C dist -czf "OpenStunts-${{ matrix.name }}.tar.gz" OpenStunts
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/OpenStunts | Out-Null
+          Copy-Item build/Release/stunts3d.exe dist/OpenStunts/
+          Copy-Item build/Release/s3d_dump.exe dist/OpenStunts/
+          Copy-Item build/Release/assets dist/OpenStunts/assets -Recurse
+          Copy-Item README.md dist/OpenStunts/
+          # SDL2 is a DLL on Windows; the .exe does not run without it.
+          Copy-Item "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin/SDL2.dll" dist/OpenStunts/
+          Compress-Archive -Path dist/OpenStunts -DestinationPath "OpenStunts-${{ matrix.name }}.zip"
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p dist/OpenStunts/libs
+          cp build/stunts3d build/s3d_dump dist/OpenStunts/
+          cp -r build/assets dist/OpenStunts/assets
+          cp README.md dist/OpenStunts/
+          dylibbundler -od -b \
+            -x dist/OpenStunts/stunts3d -x dist/OpenStunts/s3d_dump \
+            -d dist/OpenStunts/libs -p @executable_path/libs/
+          # Archive from inside dist/ so the top-level entry is OpenStunts/,
+          # matching the Linux and Windows archives.
+          (cd dist && zip -rq "../OpenStunts-${{ matrix.name }}.zip" OpenStunts)
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenStunts-${{ matrix.name }}
+          path: OpenStunts-${{ matrix.name }}.*
+          if-no-files-found: error
+
+  # ---- release: attach the archives to a tagged release --------------------
+  release:
+    name: release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish release
+        # Creates the release if needed and (re)uploads the archives.
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

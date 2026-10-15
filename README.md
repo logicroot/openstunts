@@ -63,6 +63,29 @@ into the build directory next to the executables, so there is nothing to
 download or install apart from the usual build dependencies — see
 [Assets](#assets).
 
+### Prebuilt binaries
+
+Tagged releases are built natively on Linux, Windows and macOS by
+[GitHub Actions](.github/workflows/build.yml) and attached to the GitHub
+release:
+
+| Archive | Contents |
+| --- | --- |
+| `OpenStunts-linux-x86_64.tar.gz` | `stunts3d`, `s3d_dump`, `assets/`, `README.md` |
+| `OpenStunts-windows-x64.zip` | `stunts3d.exe`, `s3d_dump.exe`, `SDL2.dll`, `assets/`, `README.md` |
+| `OpenStunts-macos-arm64.zip` | `stunts3d`, `s3d_dump`, bundled SDL2 dylibs, `assets/`, `README.md` |
+
+Every archive is self-contained: unpack it and run the binary — no Stunts
+installation and no SDL2 install needed.
+
+```sh
+tar -xzf OpenStunts-linux-x86_64.tar.gz
+./OpenStunts/stunts3d
+```
+
+The Linux build links the runner's glibc, so it needs an equal-or-newer glibc
+than the build image provides.
+
 ### Linux
 
 ```sh
@@ -270,6 +293,7 @@ src/game      scenes, race rules
 src/ui        menu model + GUI drawing (font, panels, buttons)
 tools/        asset inspection CLI, asset importer
 tests         unit tests (ctest)
+.github/      CI: native Windows/Linux/macOS builds + release packaging
 reference/    copy of the restunts reverse-engineering project (spec)
 ```
 
