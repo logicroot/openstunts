@@ -65,7 +65,7 @@ download or install apart from the usual build dependencies — see
 
 ### Prebuilt binaries
 
-Tagged releases are built natively on Linux, Windows and macOS by
+Tagged releases are built natively on Linux and Windows by
 [GitHub Actions](.github/workflows/build.yml) and attached to the GitHub
 release:
 
@@ -73,7 +73,6 @@ release:
 | --- | --- |
 | `OpenStunts-linux-x86_64.tar.gz` | `stunts3d`, `s3d_dump`, `assets/`, `README.md`, `LICENSE`, `NOTICE` |
 | `OpenStunts-windows-x64.zip` | `stunts3d.exe`, `s3d_dump.exe`, `SDL2.dll`, `assets/`, `README.md`, `LICENSE`, `NOTICE` |
-| `OpenStunts-macos-arm64.zip` | `stunts3d`, `s3d_dump`, bundled SDL2 dylibs, `assets/`, `README.md`, `LICENSE`, `NOTICE` |
 
 Every archive is self-contained: unpack it and run the binary — no Stunts
 installation and no SDL2 install needed.
@@ -96,6 +95,8 @@ cmake --build build -j
 ```
 
 ### macOS
+
+> **Note:** macOS is not currently built in CI and the build may need fixes.
 
 ```sh
 brew install cmake sdl2
@@ -293,7 +294,7 @@ src/game      scenes, race rules
 src/ui        menu model + GUI drawing (font, panels, buttons)
 tools/        asset inspection CLI, asset importer
 tests         unit tests (ctest)
-.github/      CI: native Windows/Linux/macOS builds + release packaging
+.github/      CI: native Windows/Linux builds + release packaging
 reference/    (git-ignored) local checkout of the restunts disassembly, kept
               as the porting reference; not part of the repository
 ```

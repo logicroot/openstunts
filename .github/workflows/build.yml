@@ -1,7 +1,7 @@
 name: build
 
 # Native builds on each OS: GitHub-hosted runners are just VMs, so the way to
-# get Windows/Linux/macOS binaries is to compile on each platform in parallel
+# get Windows/Linux binaries is to compile on each platform in parallel
 # and publish the results. Push a tag (v0.1.0) to also attach the archives to a
 # GitHub release. Nothing is cross-compiled.
 
@@ -36,8 +36,6 @@ jobs:
             os: ubuntu-latest
           - name: windows-x64
             os: windows-latest
-          - name: macos-arm64
-            os: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -47,12 +45,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libsdl2-dev libgl1-mesa-dev
-
-      - name: Install dependencies (macOS)
-        if: runner.os == 'macOS'
-        # dylibbundler copies SDL2 into the archive and rewrites the install
-        # name, so the .zip does not depend on a Homebrew install.
-        run: brew install sdl2 dylibbundler
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
@@ -64,14 +56,6 @@ jobs:
       - name: Configure (Linux)
         if: runner.os == 'Linux'
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-
-      - name: Configure (macOS)
-        if: runner.os == 'macOS'
-        # Point CMake at Homebrew's sdl2 in case the formula is keg-only.
-        run: >
-          cmake -S . -B build
-          -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_PREFIX_PATH="$(brew --prefix sdl2)"
 
       - name: Configure (Windows)
         if: runner.os == 'Windows'
@@ -113,20 +97,6 @@ jobs:
           # SDL2 is a DLL on Windows; the .exe does not run without it.
           Copy-Item "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin/SDL2.dll" dist/OpenStunts/
           Compress-Archive -Path dist/OpenStunts -DestinationPath "OpenStunts-${{ matrix.name }}.zip"
-
-      - name: Package (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          mkdir -p dist/OpenStunts/libs
-          cp build/stunts3d build/s3d_dump dist/OpenStunts/
-          cp -r build/assets dist/OpenStunts/assets
-          cp README.md LICENSE NOTICE dist/OpenStunts/
-          dylibbundler -od -b \
-            -x dist/OpenStunts/stunts3d -x dist/OpenStunts/s3d_dump \
-            -d dist/OpenStunts/libs -p @executable_path/libs/
-          # Archive from inside dist/ so the top-level entry is OpenStunts/,
-          # matching the Linux and Windows archives.
-          (cd dist && zip -rq "../OpenStunts-${{ matrix.name }}.zip" OpenStunts)
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
