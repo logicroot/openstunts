@@ -31,6 +31,7 @@ add_executable(s3d_tests
   dashboard_test.cpp
   menu_test.cpp
   block_texture_test.cpp
+  input_test.cpp
   frontend_opponent_test.cpp
   frontend_menu_test.cpp
 )

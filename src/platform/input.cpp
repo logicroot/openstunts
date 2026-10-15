@@ -5,23 +5,6 @@ namespace s3d {
 void Input::begin_frame() {
   keyboard_ = SDL_GetKeyboardState(nullptr);
 
-  // Reset edge-triggered flags; continuous axes are recomputed each frame.
-  controls_.gear_up = false;
-  controls_.gear_down = false;
-  controls_.reset_car = false;
-  controls_.toggle_camera = false;
-  controls_.toggle_dashboard = false;
-  controls_.pause = false;
-  controls_.menu_up = false;
-  controls_.menu_down = false;
-  controls_.menu_left = false;
-  controls_.menu_right = false;
-  controls_.menu_accept = false;
-  controls_.menu_cancel = false;
-  controls_.mouse_click = false;
-  controls_.mouse_moved = false;
-  mouse_dx_ = mouse_dy_ = 0.0f;
-
   int mx = 0;
   int my = 0;
   SDL_GetMouseState(&mx, &my);
@@ -114,6 +97,24 @@ void Input::handle_event(const SDL_Event& e) {
       default: break;
     }
   }
+}
+
+void Input::consume_edges() {
+  controls_.gear_up = false;
+  controls_.gear_down = false;
+  controls_.reset_car = false;
+  controls_.toggle_camera = false;
+  controls_.toggle_dashboard = false;
+  controls_.pause = false;
+  controls_.menu_up = false;
+  controls_.menu_down = false;
+  controls_.menu_left = false;
+  controls_.menu_right = false;
+  controls_.menu_accept = false;
+  controls_.menu_cancel = false;
+  controls_.mouse_click = false;
+  controls_.mouse_moved = false;
+  mouse_dx_ = mouse_dy_ = 0.0f;
 }
 
 }  // namespace s3d

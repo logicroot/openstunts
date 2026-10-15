@@ -100,6 +100,7 @@ void Application::run() {
     const int steps = timestep_.advance(frame_seconds);
     for (int i = 0; i < steps && scene_; ++i) {
       scene_->update(timestep_.step_seconds(), input_.get());
+      input_.consume_edges();
     }
 
     const int w = window_.drawable_width();
@@ -125,7 +126,7 @@ void Application::run() {
     fps_timer += static_cast<float>(wall_seconds);
     if (fps_timer >= 1.0f) {
       char title[160];
-      std::snprintf(title, sizeof(title), "Stunts3D — %d fps", frames);
+      std::snprintf(title, sizeof(title), "OpenStunts — %d fps", frames);
       SDL_SetWindowTitle(window_.handle(), title);
       frames = 0;
       fps_timer = 0.0f;

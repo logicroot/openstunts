@@ -42,6 +42,10 @@ class Input {
   void begin_frame();
   // Feed SDL events (edge-triggered actions are detected here).
   void handle_event(const SDL_Event& e);
+  // Consume edge-triggered events after they have been processed by the
+  // simulation. This prevents losing events on frames that run zero steps and
+  // prevents replaying the same event across multiple steps.
+  void consume_edges();
 
   // SDL reports the cursor in window pixels; the application supplies the
   // drawable/window ratio so Controls carries framebuffer pixels instead.
