@@ -82,7 +82,12 @@ FrontEndScene::FrontEndScene(Config* config, std::string config_path,
                              std::string asset_dir)
     : config_(config),
       config_path_(std::move(config_path)),
-      asset_dir_(std::move(asset_dir)) {}
+      asset_dir_(std::move(asset_dir)) {
+  // These only read the filesystem, so they run at construction: the menus and
+  // the unit tests see the real track/car lists without needing a GL context.
+  scan_tracks();
+  scan_cars();
+}
 
 FrontEndScene::~FrontEndScene() = default;
 
@@ -90,8 +95,6 @@ bool FrontEndScene::on_enter() {
   gui_.init(asset_dir_);
   gui_ready_ = true;
   load_palette();
-  scan_tracks();
-  scan_cars();
 
   // The block tile drawn behind the sub-screens.
   {
@@ -134,6 +137,9 @@ void FrontEndScene::scan_tracks() {
   for (const char* t : retail) {
     if (file_readable(path_join(asset_dir_, t))) tracks_.push_back(t);
   }
+  // Everything past the retail block is a file the player dropped in the data
+  // directory; remember where that block ends so only the extras are sorted.
+  const size_t retail_count = tracks_.size();
   std::error_code ec;
   for (const auto& entry : std::filesystem::directory_iterator(asset_dir_, ec)) {
     if (ec) break;
@@ -145,7 +151,7 @@ void FrontEndScene::scan_tracks() {
     }
   }
   // Retail tracks are already in place; the extras are sorted for stability.
-  std::sort(tracks_.begin() + std::min<size_t>(tracks_.size(), 6), tracks_.end());
+  std::sort(tracks_.begin() + static_cast<ptrdiff_t>(retail_count), tracks_.end());
 }
 
 void FrontEndScene::scan_cars() {
@@ -173,18 +179,6 @@ std::string FrontEndScene::screen_title() const {
   return {};
 }
 
-std::string FrontEndScene::screen_hint() const {
-  switch (screen_) {
-    case Screen::kMain: return "Up/Down  Select     Enter  Go     Esc  Quit";
-    case Screen::kTracks:
-    case Screen::kCar:
-    case Screen::kOpponent:
-      return "Up/Down  Select     Enter  Confirm     Esc  Back";
-    case Screen::kOptions: return "Left/Right  Change     Esc  Back";
-  }
-  return {};
-}
-
 void FrontEndScene::set_screen(Screen s) {
   screen_ = s;
   build_menu();
@@ -204,12 +198,21 @@ void FrontEndScene::build_menu() {
       break;
     }
     case Screen::kTracks: {
+      ui::MenuItem more;
+      more.label = "More Tracks";
       for (const std::string& t : tracks_) {
-        ui::MenuItem it;
-        it.label = (config_ != nullptr && config_->last_track == t) ? t + "  *" : t;
-        items.push_back(std::move(it));
+        more.values.push_back(track_label(t));
       }
-      items.push_back({"More Tracks"});
+      if (config_ != nullptr && !config_->last_track.empty()) {
+        const std::string want = track_label(config_->last_track);
+        for (size_t i = 0; i < more.values.size(); ++i) {
+          if (more.values[i] == want) {
+            more.value_index = static_cast<int>(i);
+            break;
+          }
+        }
+      }
+      items.push_back(std::move(more));
       ui::MenuItem edit;
       edit.label = "New / Edit Tracks";
       edit.enabled = false;  // placeholder
@@ -239,14 +242,14 @@ void FrontEndScene::build_menu() {
       break;
     }
     case Screen::kOpponent: {
-      // Like the Car screen: the drivers are not a list. The face shows the
-      // current opponent and Last/Next walk through them, "Clock" is the
-      // Race-against-the-Clock shortcut.
+      // Like the Car screen: "Done" comes first so returning is the default.
+      // The drivers are not a list: the face shows the selection, Last/Next
+      // walk through them, and "Clock" sets the race against the Clock.
+      items.push_back({"Done"});
       items.push_back({"Last"});
       items.push_back({"Next"});
       items.push_back({"Clock"});
       items.push_back({"Car"});
-      items.push_back({"Done"});
       break;
     }
     case Screen::kOptions: {
@@ -329,6 +332,100 @@ void FrontEndScene::handle_input(const Controls& controls) {
   }
   if (controls.menu_accept) activate();
   if (controls.menu_cancel) go_back();
+
+  handle_mouse(controls);
+}
+
+std::string FrontEndScene::track_label(const std::string& file) {
+  std::string label = file;
+  const std::string up = upper(label);
+  if (up.size() >= 5 && up.compare(up.size() - 4, 4, ".TRK") == 0) {
+    label.resize(label.size() - 4);
+  }
+  return label;
+}
+
+void FrontEndScene::select_screen(int screen) {
+  if (screen < 0 || screen > static_cast<int>(Screen::kOptions)) return;
+  screen_ = static_cast<Screen>(screen);
+  build_menu();
+}
+
+void FrontEndScene::layout_rows(const PanelLayout& layout) {
+  const float pad = gui_.theme().padding;
+  const int rows = menu_.size();
+  row_rects_.assign(static_cast<size_t>(std::max(0, rows)), RowRect{});
+  const float bx = layout.x + pad * 0.6f;
+  const float bw = layout.w - pad * 1.2f;
+  float y = layout.y + layout.title_h;
+  for (int i = 0; i < rows; ++i) {
+    row_rects_[static_cast<size_t>(i)] = RowRect{bx, y, bw, layout.button_h};
+    y += layout.button_h + layout.button_gap;
+  }
+}
+
+int FrontEndScene::hit_test_row(float vx, float vy) const {
+  for (size_t i = 0; i < row_rects_.size(); ++i) {
+    const RowRect& r = row_rects_[i];
+    if (vx >= r.x && vx <= r.x + r.w && vy >= r.y && vy <= r.y + r.h) {
+      return static_cast<int>(i);
+    }
+  }
+  return -1;
+}
+
+void FrontEndScene::pointer_event(int drawable_width, int drawable_height, float x,
+                                  float y, bool click, bool moved) {
+  gui_.set_scale(std::max(1.0f, static_cast<float>(drawable_height) / 720.0f));
+  gui_.begin(drawable_width, drawable_height);
+  layout_rows(panel_layout());
+  Controls controls;
+  controls.mouse_x = x;
+  controls.mouse_y = y;
+  controls.mouse_click = click;
+  controls.mouse_moved = moved;
+  handle_mouse(controls);
+}
+
+void FrontEndScene::handle_mouse(const Controls& controls) {
+  // An offline capture must be reproducible, and the pointer's resting position
+  // is an artifact of the display server. Ignore it while a screenshot is being
+  // taken so the keyboard-selected row is what ends up in the image.
+  if (!screenshot_path_.empty()) return;
+  // The row rectangles are filled in by render_overlay() and are in view units;
+  // the cursor arrives in drawable pixels, so divide by the GUI scale.
+  if (controls.mouse_x < 0.0f || row_rects_.empty() || menu_.empty()) return;
+  const float s = std::max(1.0f, gui_.scale());
+  const float vx = controls.mouse_x / s;
+  const float vy = controls.mouse_y / s;
+
+  const int row = hit_test_row(vx, vy);
+  if (row < 0 || row >= menu_.size()) return;
+  const ui::MenuItem& item = menu_.items()[static_cast<size_t>(row)];
+  if (!item.enabled) return;  // disabled rows neither hover nor activate
+
+  if (controls.mouse_click) {
+    if (row != menu_.selected()) {
+      menu_.set_selected(row);
+      on_selection_changed();
+    }
+    if (item.has_values()) {
+      // Click the left half of a value row to step back, the right half forward.
+      const RowRect& r = row_rects_[static_cast<size_t>(row)];
+      menu_.adjust(vx < r.x + r.w * 0.5f ? -1 : 1);
+      apply_value(row);
+    } else {
+      activate();
+    }
+    return;
+  }
+
+  // Hover only on frames where the cursor actually moved, so a resting mouse
+  // does not fight the keyboard selection.
+  if (controls.mouse_moved && row != menu_.selected()) {
+    menu_.set_selected(row);
+    on_selection_changed();
+  }
 }
 
 void FrontEndScene::go_back() {
@@ -388,6 +485,13 @@ void FrontEndScene::cycle_opponent(int delta) {
 
 void FrontEndScene::activate() {
   const int row = menu_.selected();
+  const ui::MenuItem* item = menu_.current();
+  // A value row (drop-down) responds to Enter: step forward.
+  if (item != nullptr && item->enabled && item->has_values()) {
+    menu_.adjust(1);
+    apply_value(row);
+    return;
+  }
   switch (screen_) {
     case Screen::kMain:
       switch (row) {
@@ -404,17 +508,12 @@ void FrontEndScene::activate() {
       break;
 
     case Screen::kTracks: {
-      const int n = static_cast<int>(tracks_.size());
-      if (row >= 0 && row < n) {
-        if (config_ != nullptr) config_->last_track = tracks_[static_cast<size_t>(row)];
-        set_screen(Screen::kMain);
-      } else if (row == n) {
-        scan_tracks();  // "More Tracks"
-        build_menu();
-        on_selection_changed();
-      } else {
+      const int last = menu_.size() - 1;
+      if (row == last) {
         set_screen(Screen::kMain);  // "Main Menu"
       }
+      // The value row at 0 is handled above; the disabled "New / Edit Tracks"
+      // row does nothing.
       break;
     }
 
@@ -430,14 +529,15 @@ void FrontEndScene::activate() {
 
     case Screen::kOpponent: {
       switch (row) {
-        case 0: cycle_opponent(-1); break;  // Last
-        case 1: cycle_opponent(1); break;   // Next
-        case 2: set_opponent(0); break;     // Clock = race against the clock
-        case 3:                             // Car: edit the opponent's car
+        case 0: go_back(); break;           // Done
+        case 1: cycle_opponent(-1); break;  // Last
+        case 2: cycle_opponent(1); break;   // Next
+        case 3: set_opponent(0); break;     // Clock = race against the clock
+        case 4:                             // Car: edit the opponent's car
           car_target_ = CarTarget::kOpponent;
           set_screen(Screen::kCar);
           break;
-        default: go_back(); break;          // Done
+        default: go_back(); break;
       }
       break;
     }
@@ -450,9 +550,19 @@ void FrontEndScene::activate() {
 }
 
 void FrontEndScene::apply_value(int row) {
-  if (screen_ != Screen::kOptions || config_ == nullptr) return;
+  if (config_ == nullptr) return;
   const std::string value = menu_.current_value();
   if (value.empty()) return;
+
+  if (screen_ == Screen::kTracks) {
+    if (row == 0) {
+      config_->last_track = value + ".TRK";
+      ensure_track_preview();
+    }
+    return;
+  }
+
+  if (screen_ != Screen::kOptions) return;
   const bool on = (value == "On");
   switch (row) {
     case 0: {  // Resolution
@@ -498,9 +608,16 @@ void FrontEndScene::ensure_demo() {
 }
 
 void FrontEndScene::ensure_track_preview() {
-  const int row = menu_.selected();
   const int n = static_cast<int>(tracks_.size());
-  if (row < 0 || row >= n) return;  // not a track row: keep the last preview
+  if (n == 0) return;
+  const std::string selected = (config_ != nullptr) ? config_->last_track : std::string();
+  int row = 0;
+  for (int i = 0; i < n; ++i) {
+    if (tracks_[static_cast<size_t>(i)] == selected) {
+      row = i;
+      break;
+    }
+  }
   if (track_preview_ && row == track_preview_index_) return;
 
   Track track = Track::load(path_join(asset_dir_, tracks_[static_cast<size_t>(row)]));
@@ -693,14 +810,14 @@ FrontEndScene::PanelLayout FrontEndScene::panel_layout() const {
 
   PanelLayout p;
   p.title_h = 58.0f;
-  p.hint_h = 26.0f;
   // Wide enough for the longest label + value pair at this font size
-  // ("Patterned Surfaces" / "1280x720") without the two colliding.
-  p.w = 520.0f;
+  // ("Patterned Surfaces" / "1280x720") without the two colliding. The Options
+  // screen carries the widest value rows, so it gets a little more room.
+  p.w = (screen_ == Screen::kOptions) ? 620.0f : 520.0f;
 
   // Shrink the rows when a long list would overflow the viewport (the Car
   // screen has enough rows to need this on a short window).
-  const float avail = std::max(80.0f, vh - p.title_h - p.hint_h - pad * 1.2f - margin * 2.0f);
+  const float avail = std::max(80.0f, vh - p.title_h - pad * 1.2f - margin * 2.0f);
   const float base = rows > 0 ? rows * theme.button_height + (rows - 1) * theme.button_gap
                               : 0.0f;
   const float k = (base > 0.0f && base > avail) ? avail / base : 1.0f;
@@ -708,7 +825,7 @@ FrontEndScene::PanelLayout FrontEndScene::panel_layout() const {
   p.button_gap = std::max(3.0f, theme.button_gap * k);
 
   const float list_h = rows > 0 ? rows * p.button_h + (rows - 1) * p.button_gap : 0.0f;
-  p.h = p.title_h + list_h + pad * 1.2f + p.hint_h;
+  p.h = p.title_h + list_h + pad * 1.2f;
   p.y = std::max(12.0f, (vh - p.h) * 0.5f);
   p.x = panel_on_right() ? (vw - p.w - margin) : (vw - p.w) * 0.5f;
   return p;
@@ -732,6 +849,7 @@ void FrontEndScene::render_overlay(int width, int height) {
 
   const float pad = gui_.theme().padding;
   const int rows = menu_.size();
+  layout_rows(layout);
   float y = layout.y + layout.title_h;
   for (int i = 0; i < rows; ++i) {
     const ui::MenuItem& item = menu_.items()[static_cast<size_t>(i)];
@@ -750,8 +868,6 @@ void FrontEndScene::render_overlay(int width, int height) {
     y += layout.button_h + layout.button_gap;
   }
 
-  gui_.text_centered(screen_hint(), cx, layout.y + layout.h - layout.hint_h + 6.0f,
-                     gui_.theme().text_disabled);
   gui_.flush();
 }
 
@@ -767,7 +883,11 @@ void FrontEndScene::render(Renderer& renderer, int width, int height) {
       break;
     case Screen::kTracks:
       draw_block_background(width, height);
-      if (track_preview_) track_preview_->render(renderer, width, height);
+      if (track_preview_) {
+        // Keep the map clear of the menu panel on the right.
+        track_preview_->set_overview_width(panel_layout().x * gui_.scale());
+        track_preview_->render(renderer, width, height);
+      }
       break;
     case Screen::kCar:
       draw_block_background(width, height);

@@ -18,7 +18,15 @@ void Input::begin_frame() {
   controls_.menu_right = false;
   controls_.menu_accept = false;
   controls_.menu_cancel = false;
+  controls_.mouse_click = false;
+  controls_.mouse_moved = false;
   mouse_dx_ = mouse_dy_ = 0.0f;
+
+  int mx = 0;
+  int my = 0;
+  SDL_GetMouseState(&mx, &my);
+  controls_.mouse_x = static_cast<float>(mx) * mouse_sx_;
+  controls_.mouse_y = static_cast<float>(my) * mouse_sy_;
 
   float throttle = 0.0f;
   if (keyboard_[SDL_SCANCODE_UP] || keyboard_[SDL_SCANCODE_W]) throttle += 1.0f;
@@ -79,6 +87,15 @@ void Input::handle_event(const SDL_Event& e) {
   if (e.type == SDL_MOUSEMOTION) {
     mouse_dx_ += static_cast<float>(e.motion.xrel);
     mouse_dy_ += static_cast<float>(e.motion.yrel);
+    controls_.mouse_moved = true;
+    controls_.mouse_x = static_cast<float>(e.motion.x) * mouse_sx_;
+    controls_.mouse_y = static_cast<float>(e.motion.y) * mouse_sy_;
+  }
+
+  if (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT) {
+    controls_.mouse_click = true;
+    controls_.mouse_x = static_cast<float>(e.button.x) * mouse_sx_;
+    controls_.mouse_y = static_cast<float>(e.button.y) * mouse_sy_;
   }
 
   // Basic gamepad: left stick + triggers (first connected controller).

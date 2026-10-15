@@ -3,8 +3,9 @@
 //
 // Screens: Main, Tracks, Car, Opponent, Options. The main screen runs an
 // attract-mode demo (a DriveScene driven by the AI autopilot) behind the menu.
-// Navigation is keyboard/gamepad only: Up/Down move (wrapping over disabled
-// rows), Left/Right cycle a value row, Enter activates and Escape backs out.
+// Navigation is keyboard/gamepad (Up/Down move, wrapping over disabled rows;
+// Left/Right cycle a value row; Enter activates, Escape backs out) and the
+// pointer (hover focuses a row, clicking activates it).
 //
 // Reference note: the original Stunts front-end is not part of restunts, so this
 // scene is new work; it reuses the port's assets (FONTDEF.FNT, the tracks, the
@@ -57,6 +58,17 @@ class FrontEndScene : public Scene {
   // Start on a given screen (0 = main, 1 = tracks, 2 = car, 3 = opponent,
   // 4 = options); used by the screenshot tooling.
   void set_start_screen(int screen) { start_screen_ = screen; }
+  // Select a screen and build its menu without entering it or creating any
+  // previews (no GL). Exposed for tests and tooling.
+  void select_screen(int screen);
+  // Read-only access to the menu (for test assertions).
+  const ui::MenuModel& menu() const { return menu_; }
+  // Apply a pointer event exactly as update() would: `x`/`y` are drawable
+  // pixels, `click` is an edge-triggered primary button. The menu layout is
+  // computed for the given viewport, so no GL and no previews are needed.
+  // Exposed for tests.
+  void pointer_event(int drawable_width, int drawable_height, float x, float y,
+                     bool click, bool moved);
 
   // Opponent choice: index 0 is Race against the Clock, 1..kOpponentSlots pick
   // a driver. Last/Next step through them; the face view follows the choice.
@@ -64,6 +76,9 @@ class FrontEndScene : public Scene {
   int current_opponent_index() const;
   void set_opponent(int index);
   void cycle_opponent(int delta);
+
+  // Track label for menus: hide the ".TRK" extension. Public for unit tests.
+  static std::string track_label(const std::string& file);
 
  private:
   enum class Screen { kMain, kTracks, kCar, kOpponent, kOptions };
@@ -102,13 +117,24 @@ class FrontEndScene : public Scene {
     float button_h = 0.0f;
     float button_gap = 0.0f;
     float title_h = 0.0f;
-    float hint_h = 0.0f;
   };
   PanelLayout panel_layout() const;
   bool panel_on_right() const;
   float preview_center_vx(const PanelLayout& layout) const;
   std::string screen_title() const;
-  std::string screen_hint() const;
+
+  struct RowRect {
+    float x = 0.0f;
+    float y = 0.0f;
+    float w = 0.0f;
+    float h = 0.0f;
+  };
+  std::vector<RowRect> row_rects_;
+  void handle_mouse(const Controls& controls);
+  // Fill `row_rects_` from the panel layout (view units).
+  void layout_rows(const PanelLayout& layout);
+  // Menu row containing a point in view units, or -1.
+  int hit_test_row(float vx, float vy) const;
 
   void scan_tracks();
   void scan_cars();

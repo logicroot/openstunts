@@ -80,6 +80,15 @@ void Application::run() {
     last_ticks = now;
     const double frame_seconds = deterministic_ ? fixed_step : wall_seconds;
 
+    // Mouse coordinates arrive in window pixels; scale them to the drawable
+    // (framebuffer) pixels the GUI and the scenes work in.
+    {
+      const int lw = window_.width();
+      const int lh = window_.height();
+      const float msx = (lw > 0) ? static_cast<float>(window_.drawable_width()) / static_cast<float>(lw) : 1.0f;
+      const float msy = (lh > 0) ? static_cast<float>(window_.drawable_height()) / static_cast<float>(lh) : 1.0f;
+      input_.set_mouse_scale(msx, msy);
+    }
     input_.begin_frame();
     SDL_Event e;
     while (SDL_PollEvent(&e) != 0) {

@@ -25,6 +25,15 @@ struct Controls {
   bool menu_right = false;
   bool menu_accept = false;  // Enter / Space / gamepad A
   bool menu_cancel = false;  // Escape / gamepad B (back one screen)
+
+  // Front-end mouse: the cursor position in *drawable* pixels (-1 when there is
+  // no cursor), an edge-triggered primary-button click and an edge-triggered
+  // motion flag. Hovering only acts on frames where the mouse moved, so a
+  // stationary cursor never fights the keyboard selection.
+  float mouse_x = -1.0f;
+  float mouse_y = -1.0f;
+  bool mouse_click = false;
+  bool mouse_moved = false;
 };
 
 class Input {
@@ -33,6 +42,13 @@ class Input {
   void begin_frame();
   // Feed SDL events (edge-triggered actions are detected here).
   void handle_event(const SDL_Event& e);
+
+  // SDL reports the cursor in window pixels; the application supplies the
+  // drawable/window ratio so Controls carries framebuffer pixels instead.
+  void set_mouse_scale(float sx, float sy) {
+    mouse_sx_ = sx;
+    mouse_sy_ = sy;
+  }
 
   const Controls& get() const { return controls_; }
   bool quit_requested() const { return quit_; }
@@ -50,6 +66,8 @@ class Input {
   bool quit_ = false;
   float mouse_dx_ = 0.0f;
   float mouse_dy_ = 0.0f;
+  float mouse_sx_ = 1.0f;
+  float mouse_sy_ = 1.0f;
 };
 
 }  // namespace s3d
