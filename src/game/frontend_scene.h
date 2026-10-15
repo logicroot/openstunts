@@ -58,6 +58,13 @@ class FrontEndScene : public Scene {
   // 4 = options); used by the screenshot tooling.
   void set_start_screen(int screen) { start_screen_ = screen; }
 
+  // Opponent choice: index 0 is Race against the Clock, 1..kOpponentSlots pick
+  // a driver. Last/Next step through them; the face view follows the choice.
+  // Public so the selection rules can be unit-tested without a GL context.
+  int current_opponent_index() const;
+  void set_opponent(int index);
+  void cycle_opponent(int delta);
+
  private:
   enum class Screen { kMain, kTracks, kCar, kOpponent, kOptions };
   // Whether the Car screen is editing the player's or the opponent's car.
@@ -71,11 +78,6 @@ class FrontEndScene : public Scene {
   void go_back();
   // Advance the player's or opponent's car selection by `delta` (wrapping).
   void cycle_car(int delta);
-  // Opponent choice: index 0 is Race against the Clock, 1..kOpponentSlots pick
-  // a driver. Last/Next step through them; the face view follows the choice.
-  int current_opponent_index() const;
-  void set_opponent(int index);
-  void cycle_opponent(int delta);
   // Apply a Left/Right change on the current row (called after menu_.adjust).
   void apply_value(int row);
 
