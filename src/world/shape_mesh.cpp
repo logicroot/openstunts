@@ -69,10 +69,16 @@ Circle2 minimal_enclosing_circle(const std::vector<glm::vec2>& pts) {
   return best;
 }
 
+// Appends `pts` as a triangle fan. `normal_override`, when given, replaces the
+// face normal derived from the first three vertices. The flat markings that lie
+// on a surface use it so that a marking authored with the opposite winding is
+// still shaded like the surface it is painted on.
 void append_polygon(MeshBuilder& mb, const std::vector<glm::vec3>& pts,
-                    const glm::vec4& color) {
+                    const glm::vec4& color,
+                    const glm::vec3* normal_override = nullptr) {
   if (pts.size() < 3) return;
-  const glm::vec3 n = face_normal(pts[0], pts[1], pts[2]);
+  const glm::vec3 n =
+      normal_override != nullptr ? *normal_override : face_normal(pts[0], pts[1], pts[2]);
   // Triangle fan.
   for (size_t i = 1; i + 1 < pts.size(); ++i) {
     mb.add_triangle(pts[0], pts[i], pts[i + 1], color, n);
@@ -123,9 +129,10 @@ constexpr float kDecalHostAreaRatio = 4.0f;
 // straddle several of its flat panels, so the tolerance has to allow for that.
 constexpr float kDecalPlaneTolerance = 16.0f;
 
-// True when `poly` lies on one of the other polygons in `polys`.
-bool lies_on_surface(const PolyInfo& poly, const std::vector<PolyInfo>& polys,
-                     const std::vector<char>& measured, size_t self) {
+// Returns the index of the polygon `poly` lies on -- a much larger, coplanar
+// polygon of the same shape -- or -1 when it lies on none.
+int find_surface_host(const PolyInfo& poly, const std::vector<PolyInfo>& polys,
+                      const std::vector<char>& measured, size_t self) {
   for (size_t i = 0; i < polys.size(); ++i) {
     if (i == self || !measured[i]) continue;
     const PolyInfo& host = polys[i];
@@ -136,9 +143,9 @@ bool lies_on_surface(const PolyInfo& poly, const std::vector<PolyInfo>& polys,
     if (poly.centroid.x < host.bb_min.x || poly.centroid.x > host.bb_max.x) continue;
     if (poly.centroid.y < host.bb_min.y || poly.centroid.y > host.bb_max.y) continue;
     if (poly.centroid.z < host.bb_min.z || poly.centroid.z > host.bb_max.z) continue;
-    return true;
+    return static_cast<int>(i);
   }
-  return false;
+  return -1;
 }
 
 }  // namespace
@@ -166,6 +173,7 @@ void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
   std::vector<PolyInfo> info(shape.primitives.size());
   std::vector<char> measured(shape.primitives.size(), 0);
   std::vector<char> decal(shape.primitives.size(), 0);
+  std::vector<int> decal_host(shape.primitives.size(), -1);
   if (route_decals) {
     for (size_t i = 0; i < shape.primitives.size(); ++i) {
       const ShapePrimitive& prim = shape.primitives[i];
@@ -178,7 +186,9 @@ void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
       if (polygon_info(poly, &info[i])) measured[i] = 1;
     }
     for (size_t i = 0; i < shape.primitives.size(); ++i) {
-      if (measured[i] && lies_on_surface(info[i], info, measured, i)) decal[i] = 1;
+      if (!measured[i]) continue;
+      decal_host[i] = find_surface_host(info[i], info, measured, i);
+      if (decal_host[i] >= 0) decal[i] = 1;
     }
   }
 
@@ -319,9 +329,17 @@ void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
     }
     // A marking painted on one of the shape's own surfaces goes to the decal
     // layer, which the caller draws with a forward depth bias so it wins the
-    // depth test against the surface, as it does in the original.
-    MeshBuilder& target = (route_decals && decal[prim_index]) ? *decal_out : mb;
-    append_polygon(target, poly, color);
+    // depth test against the surface, as it does in the original. It also takes
+    // the surface's normal, because the authored markings are not always wound
+    // the same way round as the surface (shape 30's fourth dash, for one), and a
+    // reversed face would otherwise be lit as if it pointed away from the sun.
+    const bool is_decal = route_decals && decal[prim_index];
+    MeshBuilder& target = is_decal ? *decal_out : mb;
+    const glm::vec3* normal_override = nullptr;
+    if (is_decal && decal_host[prim_index] >= 0) {
+      normal_override = &info[static_cast<size_t>(decal_host[prim_index])].normal;
+    }
+    append_polygon(target, poly, color, normal_override);
   }
 }
 

@@ -185,6 +185,41 @@ TEST(shape_mesh_routes_road_markings_to_decal_buffer) {
   EXPECT_EQ(surface.vertex_count() + decal.vertex_count(), whole.vertex_count());
 }
 
+// The authored markings are not all wound the same way round -- shape 30's
+// fourth dash runs backwards -- so a marking must take the normal of the surface
+// it lies on. Otherwise the port's lighting makes that one dash darker than its
+// neighbours.
+TEST(shape_mesh_lights_road_markings_like_their_surface) {
+  const std::string dir = find_asset_dir();
+  if (dir.empty()) {
+    std::printf("  (skipped: no Stunts asset dir found)\n");
+    return;
+  }
+  ShapeLibrary lib;
+  EXPECT_TRUE(lib.load_p3s(path_join(dir, "GAME1.P3S")));
+  const Shape3D* road = lib.find("road");
+  EXPECT_TRUE(road != nullptr);
+  if (road == nullptr) return;
+
+  auto paint_color = [](uint8_t paint) -> glm::vec4 {
+    return glm::vec4(static_cast<float>(paint), 0.0f, 0.0f, 1.0f);
+  };
+  const glm::mat4 model = world::shape_model(glm::vec3(0.0f), 0.0f);
+  MeshBuilder surface;
+  MeshBuilder decal;
+  world::append_shape(surface, *road, model, paint_color, 0, nullptr, &decal);
+
+  // The road is flat, so its surface and the dashes painted on it all face up,
+  // whichever way round the particular dash happened to be wound.
+  EXPECT_TRUE(decal.vertex_count() > 0);
+  for (const Vertex& v : decal.vertices()) {
+    EXPECT_TRUE(v.normal.y > 0.9f);
+  }
+  for (const Vertex& v : surface.vertices()) {
+    EXPECT_TRUE(v.normal.y > 0.9f);
+  }
+}
+
 // A multi-paint shape (the windmill has 4 paint slots) must select the colour
 // of the requested material slot. The animation cycles this slot 0..3.
 TEST(shape_mesh_material_slot_selects_paint) {
