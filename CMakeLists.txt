@@ -87,12 +87,28 @@ else()
   target_compile_options(stunts3d_core PRIVATE -Wall -Wextra)
 endif()
 
+# ---- Assets -----------------------------------------------------------------
+# The repository ships the original game *data* under assets/ (no DOS programs;
+# see tools/import_assets.sh). Copy it next to the executable so the game runs
+# without an original Stunts installation. The path search also accepts an
+# installation via --assets / $STUNTS_DIR / ~/stunts.
+set(STUNTS3D_ASSETS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/assets)
+
+function(stunts3d_bundle_assets target)
+  add_custom_command(TARGET ${target} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${STUNTS3D_ASSETS_DIR}"
+            "$<TARGET_FILE_DIR:${target}>/assets"
+    COMMENT "Bundling game assets next to ${target}")
+endfunction()
+
 # ---- Game executable --------------------------------------------------------
 add_executable(stunts3d src/main.cpp)
 target_link_libraries(stunts3d PRIVATE stunts3d_core)
 if(TARGET SDL2::SDL2main)
   target_link_libraries(stunts3d PRIVATE SDL2::SDL2main)
 endif()
+stunts3d_bundle_assets(stunts3d)
 
 # ---- Tools ------------------------------------------------------------------
 add_executable(s3d_dump tools/dump/main.cpp)

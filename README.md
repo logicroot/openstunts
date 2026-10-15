@@ -1,24 +1,37 @@
 # OpenStunts
 
+**Status: alpha.** Expect bugs, missing features and unfinished menu screens.
+See [Status](#status).
+
 A cross-platform, modernized 3D reimplementation of the classic DOS racing game
 **Stunts / 4D Sports Driving** (Distinctive Software / Brøderbund, 1990).
 
-It loads the original game assets (tracks, car models, terrain, sprites,
-physics data) directly from a Stunts installation and renders them with a
-modern OpenGL renderer, while reproducing the original driving model.
+It loads the original game data (tracks, car models, terrain, sprites, physics
+tables) and renders it with a modern OpenGL 3.3 core renderer, while
+reproducing the original driving model. A Minecraft-style front-end menu with
+an AI-driven attract demo sits in front of the game.
+
+**This project exists to test the capabilities of current AI models:** porting a
+complete commercial game from its disassembly — geometry, physics, opponents,
+HUD and a front-end — together with its tests and documentation.
 
 * Reference disassembly / decompilation: [restunts](https://github.com/4d-stunts/restunts)
-* Original game data: expected in `~/stunts` (or via `--assets` / `$STUNTS_DIR`)
+* Game data: bundled in [`assets/`](assets/) — see [Assets](#assets); an
+  original installation is *optional*, via `--assets`, `$STUNTS_DIR` or
+  `~/stunts`
 
 ## Status
 
-The port runs the original tracks with the original car physics. Reference
-geometry, tables and constants come from the restunts disassembly; where the
-disassembly and the partial C decompilation disagree, the assembly wins.
+**Alpha.** The port runs the original tracks with the original car physics;
+large parts of the game (audio, replays, career) and several menu screens are
+still missing or inert. Reference geometry, tables and constants come from the
+restunts disassembly; where the disassembly and the partial C decompilation
+disagree, the assembly wins.
 
 Implemented:
 
 - [x] CMake project + SDL2 window + OpenGL 3.3 core renderer
+- [x] Bundled game data (`assets/`) + automatic copy into the build directory
 - [x] Asset loaders: `.TRK` tracks, `.P3S` shapes, `.RES` archives, palettes,
       sprites, `.FNT` fonts, compressed resources
 - [x] Track geometry: elements, terrain heightfield, skybox panorama
@@ -29,16 +42,26 @@ Implemented:
       race clock, lap timing
 - [x] HUD, in-cockpit dashboard and crash overlay
 - [x] Drive scene (chase + cockpit cameras) and a debug fly-camera scene
+- [x] Front-end menu (main / tracks / car / opponent / options) with an
+      AI-driven attract demo, keyboard, gamepad and mouse support
 
 Not yet:
 
 - [ ] Audio (engine / skid / crash effects)
 - [ ] Replays (`.RPL`)
-- [ ] Front-end menus / career
+- [ ] Career mode
+- [ ] New / Edit Tracks, Auto-Manual transmission, Colour and Audio rows are
+      placeholders (shown, disabled)
+- [ ] Several Options rows are shown but not yet acted on
 
 ## Building
 
 Requirements: CMake ≥ 3.20, a C++17 compiler, SDL2 development files, OpenGL.
+
+The game data already lives in the repository (`assets/`) and CMake copies it
+into the build directory next to the executables, so there is nothing to
+download or install apart from the usual build dependencies — see
+[Assets](#assets).
 
 ### Linux
 
@@ -68,20 +91,58 @@ cmake --build build -j
    ```
    (or point `SDL2_DIR` at an official SDL2 development package.)
 
+## Assets
+
+The original game **data** ships in this repository under
+[`assets/`](assets/) and CMake copies it next to every executable on each build
+(`build/assets/`, `build/tests/assets/`), so a fresh clone runs with no further
+setup:
+
+```sh
+git clone <repo> && cd <repo>
+cmake -S . -B build && cmake --build build -j
+./build/stunts3d          # menu + attract demo, no Stunts install needed
+```
+
+What is in `assets/`, and what is deliberately not:
+
+| Included — data files | Excluded — DOS programs |
+| --- | --- |
+| `.TRK` tracks, `.PVS`/`.P3S`/`.PES` shapes, `.PRE` element tables, `.RES` cars, `.FNT` fonts, `.KMS`/`.SFX`/`.VCE` effects, `.RPL` replay, `.COD`/`.CMN`/`.DIF`/`.HDR` video-mode data, and the rest of the original data set | `*.EXE`, `*.COM` and the `*.DRV` loadable driver binaries — `STUNTS.COM`, `ST.COM`, `LOAD.EXE`, `SETUP.EXE`, `AD15.DRV`, `MT15.DRV`, `PC15.DRV`, `TD15.DRV` |
+
+The `.DRV` files are COM-style programs too (they start with a near `JMP`),
+they merely look like data. None of these are needed: the port re-implements
+the game code in `src/`.
+
+To re-import the data from your own installation:
+
+```sh
+tools/import_assets.sh /path/to/stunts
+```
+
+An original installation still works as an alternative (see
+[Running](#running)), and `--assets DIR` always wins.
+
 ## Running
 
 ```
-./build/stunts3d [--assets DIR] [--track FILE.trk] [--config FILE]
-                 [--car ID] [--opp-car ID] [--opp N]
+./build/stunts3d [--menu] [--menu-screen N] [--assets DIR] [--track FILE.trk]
+                 [--config FILE] [--car ID] [--opp-car ID] [--opp N]
                  [--screenshot out.png] [--frames N] [--camera N]
                  [--wheel-scale F] [--top] [--drive]
 ```
 
-Without `--drive` the debug fly-camera track viewer is shown; with `--drive`
-you get the driveable car on the track:
+With no arguments the front-end menu starts, with an AI-driven demo race
+running behind it. *Let's Drive* starts a race with the selected track, car and
+opponent, *Tracks* shows a top-down view of the selected track, *Car* and
+*Opponent* pick the racers, and *Exit* quits.
+
+A scene can also be requested directly (this is what the screenshot tooling
+does):
 
 ```sh
-./build/stunts3d --drive --car PMIN --camera 1
+./build/stunts3d --drive --car PMIN --camera 1     # driveable car
+./build/stunts3d --top --track HELENS.TRK          # debug top-down viewer
 ```
 
 | Flag | Meaning |
@@ -97,17 +158,31 @@ you get the driveable car on the track:
 | `--camera N` | Drive camera: `0` = cockpit, non-zero = chase |
 | `--wheel-scale F` | Scale each wheel about its centre (default `1.25`) |
 | `--top` | (debug scene) top-down view |
-| `--drive` | Run the driveable car scene instead of the debug viewer |
+| `--drive` | Run the driveable car scene instead of the front-end menu |
+| `--menu` | Force the front-end menu, even alongside other flags |
+| `--menu-screen N` | Start the menu on a screen: 0 main, 1 tracks, 2 car, 3 opponent, 4 options |
 
 With `--screenshot` the loop ignores the wall clock and advances the simulation
 by one fixed step per rendered frame, so a given `--frames N` always captures the
 same simulated moment even on a loaded machine (repeated captures are
 byte-identical).
 
-The asset directory is searched in this order: `--assets`, `$STUNTS_DIR`,
-`~/stunts`, `./stunts`, `../stunts`.
+The asset directory is searched in this order: `--assets`, `$STUNTS_DIR`, the
+bundled copy (`<executable>/assets`, `<executable>/../assets`, then `./assets`),
+`~/stunts`, `./stunts`, `../stunts`. Unless you override it, the bundled copy is
+what gets used, so no Stunts installation is required.
 
 ### Controls
+
+Front-end menu:
+
+| Input | Action |
+| --- | --- |
+| `Up` / `Down` | Move the selection (wraps, skips disabled rows) |
+| `Left` / `Right` | Step the value of the selected row (track, option) |
+| `Enter`, gamepad `A` | Activate the selected row |
+| `Esc`, gamepad `B` | Back / main menu |
+| Mouse | Hover to select, click to activate; the left/right half of a value row steps it |
 
 Drive scene:
 
@@ -177,11 +252,13 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-Tests that need game assets skip themselves when no asset directory is found.
+Tests that need game assets skip themselves when no asset directory is found;
+with the bundled `assets/` they run against the copy in `build/tests/assets/`.
 
 ## Layout
 
 ```
+assets/       original Stunts game data shipped with the repo (no programs)
 src/core      settings, logging, path discovery, fixed timestep
 src/platform  SDL2 window / GL context / input
 src/render    GL loader, shaders, meshes, camera, HUD, sprites, screenshots
@@ -190,12 +267,18 @@ src/world     track -> geometry, element/object tables, materials, skybox,
               car meshes, dashboard, route graph
 src/physics   car dynamics, collision, opponents (ported from restunts)
 src/game      scenes, race rules
-tools/dump    asset inspection CLI
+src/ui        menu model + GUI drawing (font, panels, buttons)
+tools/        asset inspection CLI, asset importer
 tests         unit tests (ctest)
 reference/    copy of the restunts reverse-engineering project (spec)
 ```
 
 ## Credits
 
-Original game © Distinctive Software / Brøderbund. This project ships no
-original assets and requires a legitimate Stunts installation.
+Original game © Distinctive Software / Brøderbund.
+
+The data files under `assets/` come from a Stunts installation and remain the
+property of their original rights holders. They are included so the project can
+be cloned and run for research, interoperability and testing purposes — and the
+DOS program files (`*.EXE`, `*.COM`, `*.DRV`) are deliberately *not*
+distributed with it.
