@@ -41,6 +41,44 @@ TEST(build_track_shape_geometry_default_track) {
   EXPECT_TRUE(stats.overlays > 0);
 }
 
+// Elevated and sloped road surfaces are stippled by the original
+// (draw_patterned_lines, seg012.asm); build_track_shape_geometry must carry
+// those material dither masks into the vertex stream so the renderer can
+// reproduce them, while flat materials stay flat (pattern 0).
+TEST(build_track_shape_geometry_carries_pattern_masks) {
+  const std::string dir = find_asset_dir();
+  if (dir.empty()) {
+    std::printf("  (skipped: no Stunts asset dir found)\n");
+    return;
+  }
+  ShapeLibrary lib;
+  lib.load_p3s(path_join(dir, "GAME1.P3S"));
+  lib.load_p3s(path_join(dir, "GAME2.P3S"));
+  if (lib.shapes().empty()) return;
+  Track track = Track::load(path_join(dir, "DEFAULT.TRK"));
+
+  MeshBuilder mb;
+  build_track_shape_geometry(track, lib, mb);
+  EXPECT_TRUE(mb.vertex_count() > 0);
+
+  bool saw_flat = false;
+  bool saw_pattern = false;
+  bool saw_deck_mask = false;
+  for (const Vertex& v : mb.vertices()) {
+    if (v.pattern == 0.0f) {
+      saw_flat = true;
+    } else {
+      saw_pattern = true;
+      // Materials 22/23/24 (elevated/sloped road deck and its dashes) all use
+      // the 0x77DD tile.
+      if (v.pattern == 30685.0f) saw_deck_mask = true;
+    }
+  }
+  EXPECT_TRUE(saw_flat);       // flat roads, ground and scenery
+  EXPECT_TRUE(saw_pattern);    // DEFAULT.TRK has elevated/sloped road pieces
+  EXPECT_TRUE(saw_deck_mask);  // 0x77DD deck mask
+}
+
 TEST(build_track_shape_geometry_is_deterministic) {
   const std::string dir = find_asset_dir();
   if (dir.empty()) return;

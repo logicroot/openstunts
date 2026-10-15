@@ -43,6 +43,18 @@ uint8_t material_color_index(uint8_t material);
 // patterned materials, so callers may ignore this.
 bool material_patterned(uint8_t material);
 
+// The screen-space dither mask for `material` (material_pattern2_list). The
+// original fills a patterned polygon with `draw_patterned_lines` (seg012.asm),
+// which uses this 16-bit mask as an 8-wide tile: on each scanline it draws the
+// material colour where a bit is set and leaves the pixel behind it where a bit
+// is clear, alternating between the low and high byte from one scanline to the
+// next. So a patterned material is stippled over whatever was drawn under it.
+//
+// Returns 0 for flat materials and for any material whose mask is 0 (material
+// 118, the windmill's transparent animation mask, which therefore draws
+// nothing).
+uint16_t material_pattern(uint8_t material);
+
 // True when the material draws nothing. Material 118 is the "windmill
 // animation mask" — the original renders it as a transparent stipple used to
 // hide the sail positions that are not currently lit; there is no palette

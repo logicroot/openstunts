@@ -328,3 +328,32 @@ TEST(shape_mesh_paint_callback_can_skip) {
                       [](uint8_t) { return glm::vec4(0.0f); });
   EXPECT_EQ(mb.vertex_count(), 0u);
 }
+
+// A patterned material is carried per vertex as a screen-space dither mask so
+// the fragment shader can stipple the polygon (the original's
+// draw_patterned_lines). The mask is looked up from the paint index; without a
+// lookup function every vertex stays flat (0).
+TEST(shape_mesh_stores_pattern_per_vertex) {
+  Shape3D shape;
+  shape.vertices = {Vec3i{0, 0, 0}, Vec3i{1, 0, 0}, Vec3i{1, 0, 1}, Vec3i{0, 0, 1}};
+  ShapePrimitive prim;
+  prim.kind = PrimKind::Polygon;
+  prim.paint = {22};
+  prim.indices = {0, 1, 2, 3};
+  shape.primitives.push_back(prim);
+
+  const auto paint_color = [](uint8_t) -> glm::vec4 { return glm::vec4(1.0f); };
+
+  MeshBuilder flat;
+  world::append_shape(flat, shape, glm::mat4(1.0f), paint_color);
+  EXPECT_TRUE(flat.vertex_count() > 0);
+  for (const Vertex& v : flat.vertices()) EXPECT_TRUE(v.pattern == 0.0f);
+
+  MeshBuilder patterned;
+  world::append_shape(patterned, shape, glm::mat4(1.0f), paint_color, 0, nullptr, nullptr,
+                      [](uint8_t paint) -> uint16_t {
+                        return paint == 22 ? 0x77DDu : 0u;
+                      });
+  EXPECT_EQ(patterned.vertex_count(), flat.vertex_count());
+  for (const Vertex& v : patterned.vertices()) EXPECT_TRUE(v.pattern == 30685.0f);
+}

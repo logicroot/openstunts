@@ -32,6 +32,28 @@ constexpr uint8_t kMaterialPatternList[kMaterialCount] = {
       0,
 };
 
+// material_pattern2_list (dseg.asm 21364..21492): the 16-bit dither mask used
+// for each patterned material. Indexed the same as material_pattern_list.
+constexpr uint16_t kMaterialPattern2List[kMaterialCount] = {
+    65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535,
+    65535, 65535, 65535, 65535,
+    65535, 65535,     0, 65535, 65535, 65535, 30685, 56695, 30685, 65535, 65535, 65535,
+    65535, 65535, 65535, 65535,
+    65535, 65535, 30685, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535,
+    65535, 65535, 65535, 65535,
+    65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535,
+    65535, 65535, 65535, 65535,
+        0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,
+        0,     0,     0,     0,
+        0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,     0,
+        0,     0, 30685, 65535,
+    65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535,     0,     0,
+        0,     0,     0,     0,
+        0,     0,     0,     0,     0,     0,     0, 52275, 13260, 46701, 18834, 46701,
+    18834, 46701, 18834,     0,
+        0,
+};
+
 }  // namespace
 
 uint8_t material_color_index(uint8_t material) {
@@ -40,6 +62,12 @@ uint8_t material_color_index(uint8_t material) {
 
 bool material_patterned(uint8_t material) {
   return material < kMaterialCount && kMaterialPatternList[material] != 0;
+}
+
+uint16_t material_pattern(uint8_t material) {
+  if (material >= kMaterialCount) return 0;
+  if (kMaterialPatternList[material] == 0) return 0;
+  return kMaterialPattern2List[material];
 }
 
 // Material 118 ("windmill animation mask") is listed by the original material

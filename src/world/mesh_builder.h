@@ -20,20 +20,21 @@ class MeshBuilder {
   size_t vertex_count() const { return vertices_.size(); }
 
   uint32_t add_vertex(const glm::vec3& p, const glm::vec3& n, const glm::vec4& c,
-                      const glm::vec2& uv = glm::vec2(0.0f)) {
-    vertices_.push_back(Vertex{p, n, c, uv});
+                      const glm::vec2& uv = glm::vec2(0.0f), float pattern = 0.0f) {
+    vertices_.push_back(Vertex{p, n, c, uv, pattern});
     return static_cast<uint32_t>(vertices_.size() - 1);
   }
 
   void add_triangle(const glm::vec3& a, const glm::vec3& b, const glm::vec3& c,
-                    const glm::vec4& color, const glm::vec3& normal = glm::vec3(0.0f)) {
+                    const glm::vec4& color, const glm::vec3& normal = glm::vec3(0.0f),
+                    float pattern = 0.0f) {
     const glm::vec3 n = (normal == glm::vec3(0.0f))
                             ? glm::normalize(glm::cross(b - a, c - a))
                             : normal;
     const uint32_t base = static_cast<uint32_t>(vertices_.size());
-    add_vertex(a, n, color);
-    add_vertex(b, n, color);
-    add_vertex(c, n, color);
+    add_vertex(a, n, color, glm::vec2(0.0f), pattern);
+    add_vertex(b, n, color, glm::vec2(0.0f), pattern);
+    add_vertex(c, n, color, glm::vec2(0.0f), pattern);
     indices_.insert(indices_.end(), {base, base + 1, base + 2});
   }
 

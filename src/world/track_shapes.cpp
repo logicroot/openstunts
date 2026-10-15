@@ -144,6 +144,12 @@ void build_track_shape_geometry_impl(const Track& track, const ShapeLibrary& lib
   MeshBuilder& overlay = layer(layers.overlay);
   MeshBuilder* lines = layers.lines;
 
+  // Elevated and sloped road surfaces (materials 22/23/24) and a few scenery
+  // materials are stippled in the original (draw_patterned_lines, seg012.asm);
+  // the dither mask is a property of the material index, so it is looked up
+  // from the same table regardless of the colour callback.
+  const PaintPatternFn pattern_for = [](uint8_t paint) { return material_pattern(paint); };
+
   const TerrainShape* terrains = terrain_shapes();
 
   // ---- Terrain -------------------------------------------------------------
@@ -169,7 +175,7 @@ void build_track_shape_geometry_impl(const Track& track, const ShapeLibrary& lib
           add_ground_quad(base, cx, cz, ground_color, -1.0f);
           if (s != nullptr) {
             append_shape(terrain_mb, *s, fixed_model({cx, height, cz}, ts.rot_y),
-                         paint_color);
+                         paint_color, 0, nullptr, nullptr, pattern_for);
             ++local.terrain_shapes;
           } else {
             ++local.missing_shapes;
@@ -211,7 +217,7 @@ void build_track_shape_geometry_impl(const Track& track, const ShapeLibrary& lib
         // road) are routed to the decal layer so they win the depth test against
         // the surface they are drawn on, as in the original.
         append_shape(surface, *s, fixed_model(pos, def.rot_y), paint_color, material, lines,
-                     layers.decal);
+                     layers.decal, pattern_for);
         if (animated) {
           ++local.animated;
         } else {
@@ -230,7 +236,7 @@ void build_track_shape_geometry_impl(const Track& track, const ShapeLibrary& lib
             // The overlay object can itself be a surface with markings (the
             // finish line's road piece), so route its markings on too.
             append_shape(overlay, *os, fixed_model(pos, orot), paint_color, material, lines,
-                         layers.decal);
+                         layers.decal, pattern_for);
             ++local.overlays;
           } else {
             ++local.missing_shapes;

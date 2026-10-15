@@ -7,12 +7,17 @@ namespace s3d {
 
 namespace {
 
+// The original racing view ran at 320x200 (VGA mode 13h).
+constexpr float kOriginalWidth = 320.0f;
+constexpr float kOriginalHeight = 200.0f;
+
 const char* kWorldVS = R"GLSL(
 #version 330 core
 layout(location = 0) in vec3 a_pos;
 layout(location = 1) in vec3 a_normal;
 layout(location = 2) in vec4 a_color;
 layout(location = 3) in vec2 a_uv;
+layout(location = 4) in float a_pattern;
 
 uniform mat4 u_model;
 uniform mat4 u_view;
@@ -22,6 +27,7 @@ out vec3 v_world_pos;
 out vec3 v_normal;
 out vec4 v_color;
 out vec2 v_uv;
+out float v_pattern;
 out float v_view_depth;
 
 void main() {
@@ -31,6 +37,7 @@ void main() {
   v_normal = mat3(u_model) * a_normal;
   v_color = a_color;
   v_uv = a_uv;
+  v_pattern = a_pattern;
   v_view_depth = -view_pos.z;
   gl_Position = u_proj * view_pos;
 }
@@ -42,15 +49,34 @@ in vec3 v_world_pos;
 in vec3 v_normal;
 in vec4 v_color;
 in vec2 v_uv;
+in float v_pattern;
 in float v_view_depth;
 
 uniform vec3 u_light_dir;
 uniform vec4 u_fog_color;
 uniform float u_fog_density;
+// Screen-space dither for patterned materials. u_pattern_fill enables it;
+// u_pattern_scale maps a window pixel to the original 320x200 pixel grid so the
+// stipple stays as chunky as it was on the original hardware.
+uniform int u_pattern_fill;
+uniform vec2 u_pattern_scale;
 
 out vec4 frag_color;
 
 void main() {
+  // draw_patterned_lines (seg012.asm): an 8-wide tile of a 16-bit mask, using
+  // the high byte on even scanlines and the low byte on odd ones. A set bit
+  // draws the material colour; a clear bit leaves whatever was drawn under the
+  // polygon, which a z-buffered renderer reproduces by discarding the fragment.
+  if (u_pattern_fill != 0 && v_pattern > 0.5) {
+    uint mask = uint(v_pattern + 0.5);
+    int px = int(floor(gl_FragCoord.x * u_pattern_scale.x));
+    int py = int(floor(gl_FragCoord.y * u_pattern_scale.y));
+    uint row = ((py & 1) == 0) ? (mask >> 8) : (mask & 0xFFu);
+    uint bit = (row >> uint(7 - (px & 7))) & 1u;
+    if (bit == 0u) discard;
+  }
+
   vec3 n = normalize(v_normal);
   float ndl = max(dot(n, normalize(u_light_dir)), 0.0);
   // Gentle relief only. The original engine never shaded a polygon by its
@@ -93,6 +119,13 @@ void Renderer::begin_frame(int drawable_width, int drawable_height,
   current_aspect_ = (drawable_height > 0)
                         ? static_cast<float>(drawable_width) / static_cast<float>(drawable_height)
                         : 1.0f;
+  // The original tiled its material dither on the 320x200 mode-13h framebuffer.
+  // Map a window pixel back onto that grid so the stipple keeps its original
+  // chunkiness instead of shrinking to fine noise at modern resolutions.
+  pattern_scale_ = (drawable_width > 0 && drawable_height > 0)
+                       ? glm::vec2(kOriginalWidth / static_cast<float>(drawable_width),
+                                   kOriginalHeight / static_cast<float>(drawable_height))
+                       : glm::vec2(1.0f);
   glViewport(0, 0, drawable_width, drawable_height);
   glClearColor(clear_color.r, clear_color.g, clear_color.b, 1.0f);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -116,6 +149,7 @@ void Renderer::draw_world(const Mesh& mesh, const Camera& camera,
   world_shader_.set_vec3("u_light_dir", light_dir_);
   world_shader_.set_vec4("u_fog_color", glm::vec4(fog_color_, 1.0f));
   world_shader_.set_float("u_fog_density", fog_density_);
+  set_pattern_uniforms();
   mesh.draw();
 }
 
@@ -129,7 +163,13 @@ void Renderer::draw_world_lines(const Mesh& mesh, const Camera& camera,
   world_shader_.set_vec3("u_light_dir", light_dir_);
   world_shader_.set_vec4("u_fog_color", glm::vec4(fog_color_, 1.0f));
   world_shader_.set_float("u_fog_density", fog_density_);
+  set_pattern_uniforms();
   mesh.draw_lines();
+}
+
+void Renderer::set_pattern_uniforms() {
+  world_shader_.set_int("u_pattern_fill", pattern_fill_ ? 1 : 0);
+  world_shader_.set_vec2("u_pattern_scale", pattern_scale_);
 }
 
 }  // namespace s3d

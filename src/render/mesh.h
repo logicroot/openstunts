@@ -13,6 +13,10 @@ struct Vertex {
   glm::vec3 normal{0.0f, 1.0f, 0.0f};
   glm::vec4 color{1.0f};
   glm::vec2 uv{0.0f};
+  // Screen-space dither mask for a patterned material (0 = flat fill). It is a
+  // 16-bit value from world::material_pattern, carried as a float so it fits
+  // the interleaved vertex format; the fragment shader decodes it.
+  float pattern = 0.0f;
 };
 
 class Mesh {

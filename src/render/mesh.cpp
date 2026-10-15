@@ -57,6 +57,9 @@ void Mesh::upload(const std::vector<Vertex>& vertices,
   glEnableVertexAttribArray(3);
   glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, stride,
                         reinterpret_cast<void*>(offsetof(Vertex, uv)));
+  glEnableVertexAttribArray(4);
+  glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, stride,
+                        reinterpret_cast<void*>(offsetof(Vertex, pattern)));
 
   if (index_count_ > 0) {
     glGenBuffers(1, &ibo_);

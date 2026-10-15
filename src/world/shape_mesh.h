@@ -28,6 +28,10 @@ inline constexpr float kCarWheelRimRatio = 0.65f;
 // color with alpha 0 skips the primitive.
 using PaintColorFn = std::function<glm::vec4(uint8_t)>;
 
+// Screen-space dither mask chosen per primitive paint index (world::
+// material_pattern). Zero selects a flat fill.
+using PaintPatternFn = std::function<uint16_t(uint8_t)>;
+
 // Appends `shape` transformed by `model`. Polygons are triangle-fanned; points
 // are skipped. `color` is used for every primitive.
 void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
@@ -52,9 +56,14 @@ void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
 // because their depths differ only by float error. Routing the markings to a
 // separate buffer lets the caller draw them with a forward depth bias (see
 // TrackMeshLayers::decal), which reproduces the original's outcome.
+//
+// When `pattern_for` is set, each primitive's paint index is mapped to a
+// screen-space dither mask and stored per vertex; the fragment shader stipples
+// the polygon accordingly. Leave it empty for a flat fill.
 void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
                   const PaintColorFn& color_for, int material = 0,
-                  MeshBuilder* line_out = nullptr, MeshBuilder* decal_out = nullptr);
+                  MeshBuilder* line_out = nullptr, MeshBuilder* decal_out = nullptr,
+                  const PaintPatternFn& pattern_for = {});
 
 // Convenience: builds an identity-transform model that translates to (tx, ty, tz)
 // and rotates `yaw_deg` degrees about the world Y axis.

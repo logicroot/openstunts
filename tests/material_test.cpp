@@ -60,6 +60,37 @@ TEST(material_transparent_matches_reference) {
   EXPECT_TRUE(!material_transparent(19));
 }
 
+TEST(material_pattern_masks_match_reference) {
+  // material_pattern2_list (dseg.asm 21364..21492): the 8x2 dither tile used by
+  // draw_patterned_lines. Check the values the road and windmill materials use.
+  EXPECT_EQ(material_pattern(22), 0x77DDu);  // 30685
+  EXPECT_EQ(material_pattern(23), 0xDD77u);  // 56695
+  EXPECT_EQ(material_pattern(24), 0x77DDu);
+  EXPECT_EQ(material_pattern(34), 0x77DDu);
+  EXPECT_EQ(material_pattern(94), 0x77DDu);
+  EXPECT_EQ(material_pattern(119), 0xCC33u);
+  EXPECT_EQ(material_pattern(120), 0x33CCu);
+  EXPECT_EQ(material_pattern(121), 0xB66Du);
+  EXPECT_EQ(material_pattern(122), 0x4992u);
+  EXPECT_EQ(material_pattern(123), 0xB66Du);
+  EXPECT_EQ(material_pattern(124), 0x4992u);
+  EXPECT_EQ(material_pattern(125), 0xB66Du);
+  EXPECT_EQ(material_pattern(126), 0x4992u);
+}
+
+TEST(material_pattern_flat_and_transparent_are_zero) {
+  // Flat materials have no mask.
+  EXPECT_EQ(material_pattern(0), 0u);
+  EXPECT_EQ(material_pattern(19), 0u);
+  EXPECT_EQ(material_pattern(21), 0u);
+  // Material 118 is the "pattern transparent" windmill mask: patterned, but its
+  // mask is 0, so it draws nothing.
+  EXPECT_EQ(material_pattern(118), 0u);
+  // Out of range is flat.
+  EXPECT_EQ(material_pattern(kMaterialCount), 0u);
+  EXPECT_EQ(material_pattern(255), 0u);
+}
+
 TEST(material_color_samples_vga_palette) {
   const std::string dir = find_asset_dir();
   if (dir.empty()) {

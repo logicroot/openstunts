@@ -70,6 +70,7 @@ Config Config::load(const std::string& path) {
     else if (key == "player_car") c.player_car = val;
     else if (key == "opponent_car") c.opponent_car = val;
     else if (key == "opponent_type") c.opponent_type = std::atoi(val.c_str());
+    else if (key == "pattern_fill") c.pattern_fill = parse_bool(val);
   }
   S3D_INFO("config: loaded %s", p.c_str());
   return c;
@@ -110,6 +111,7 @@ bool Config::save(const std::string& path) const {
   out << "player_car = " << player_car << "\n";
   out << "opponent_car = " << opponent_car << "\n";
   out << "opponent_type = " << opponent_type << "\n";
+  out << "pattern_fill = " << (pattern_fill ? 1 : 0) << "\n";
   return true;
 }
 

@@ -75,13 +75,13 @@ Circle2 minimal_enclosing_circle(const std::vector<glm::vec2>& pts) {
 // still shaded like the surface it is painted on.
 void append_polygon(MeshBuilder& mb, const std::vector<glm::vec3>& pts,
                     const glm::vec4& color,
-                    const glm::vec3* normal_override = nullptr) {
+                    const glm::vec3* normal_override = nullptr, float pattern = 0.0f) {
   if (pts.size() < 3) return;
   const glm::vec3 n =
       normal_override != nullptr ? *normal_override : face_normal(pts[0], pts[1], pts[2]);
   // Triangle fan.
   for (size_t i = 1; i + 1 < pts.size(); ++i) {
-    mb.add_triangle(pts[0], pts[i], pts[i + 1], color, n);
+    mb.add_triangle(pts[0], pts[i], pts[i + 1], color, n, pattern);
   }
 }
 
@@ -157,7 +157,7 @@ void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
 
 void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
                   const PaintColorFn& color_for, int material, MeshBuilder* line_out,
-                  MeshBuilder* decal_out) {
+                  MeshBuilder* decal_out, const PaintPatternFn& pattern_for) {
   // Pre-transform all vertices once.
   std::vector<glm::vec3> pts(shape.vertices.size());
   for (size_t i = 0; i < shape.vertices.size(); ++i) {
@@ -205,6 +205,9 @@ void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
     }
     const glm::vec4 color = color_for(paint);
     if (color.a <= 0.0f) continue;
+    // Screen-space dither mask for a patterned material (0 = flat fill).
+    const float pattern =
+        pattern_for ? static_cast<float>(pattern_for(paint)) : 0.0f;
 
     if (prim.kind == PrimKind::Line) {
       if (line_out == nullptr || prim.indices.size() < 2) continue;
@@ -339,7 +342,7 @@ void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
     if (is_decal && decal_host[prim_index] >= 0) {
       normal_override = &info[static_cast<size_t>(decal_host[prim_index])].normal;
     }
-    append_polygon(target, poly, color, normal_override);
+    append_polygon(target, poly, color, normal_override, pattern);
   }
 }
 

@@ -155,12 +155,13 @@ Settings live in an INI file (`key = value`, `#`/`;` comments):
 | `player_car` | COUN | Player car id |
 | `opponent_car` | | Opponent car id (empty = solo race) |
 | `opponent_type` | 0 | Opponent driving style, 1..6 |
+| `pattern_fill` | true | Stipple patterned materials (elevated/sloped road) |
 
 ## Tools
 
 ```
 ./build/s3d_dump trk FILE.trk   # ASCII item + terrain map and statistics
-./build/s3d_dump p3s FILE.p3s   # 3D shape dump (vertices, primitives)
+./build/s3d_dump p3s FILE.p3s   # List the resources in a 3D shape archive
 ./build/s3d_dump dir            # Print the detected asset directory
 ```
 

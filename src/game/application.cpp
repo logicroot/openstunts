@@ -39,6 +39,7 @@ bool Application::init(const Config& config, const std::string& asset_dir) {
     return false;
   }
   renderer_.set_fog(glm::vec3(0.60f, 0.72f, 0.85f), 1.0f / 60000.0f);
+  renderer_.set_pattern_fill(config.pattern_fill);
 
   SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER);
   for (int i = 0; i < SDL_NumJoysticks(); ++i) {

@@ -30,6 +30,11 @@ struct Config {
   // The opponent driving style (gameconfig.game_opponenttype), 1..6: selects
   // the OPPn.PRE sped table that sets its per-element target speeds.
   int opponent_type = 1;
+  // Faithful reproduction of the original's patterned material fill: elevated
+  // and sloped road surfaces (materials 22/23/24) and a few scenery materials
+  // are drawn as a screen-space stipple rather than a flat fill
+  // (draw_patterned_lines, seg012.asm). Disable to force every material flat.
+  bool pattern_fill = true;
 
   // Returns the default config file path:
   //   Linux/macOS: $XDG_CONFIG_HOME/stunts3d/config.ini or ~/.config/stunts3d/config.ini
