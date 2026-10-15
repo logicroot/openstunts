@@ -1,0 +1,47 @@
+OpenStunts
+Copyright 2026 Stefan Dreher
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+the original source code of this project except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+--------------------------------------------------------------------------------
+THIRD-PARTY COMPONENTS
+--------------------------------------------------------------------------------
+
+This product includes software developed by third parties:
+
+  * OpenGL Mathematics (GLM) - https://github.com/g-truc/glm
+    Licensed under the Happy Bunny License (Modified MIT License) or the MIT
+    License. See third_party/glm/copying.txt.
+
+  * stb_image_write (stb) - https://github.com/nothings/stb
+    Dual-licensed: MIT, or public domain (Unlicense), at your option. See the
+    LICENSE section at the end of third_party/stb/stb_image_write.h.
+
+--------------------------------------------------------------------------------
+NOT COVERED BY THIS LICENSE
+--------------------------------------------------------------------------------
+
+The Apache License 2.0 applies to the original source code of this project
+only. It does NOT apply to the following, and no rights to them are granted
+here:
+
+  * assets/ - game data files from "Stunts / 4D Sports Driving"
+    (Distinctive Software / Broderbund, 1990). These are the property of their
+    original owners. They are included so that the port can be built and run
+    without an original installation.
+
+  * Material derived from the Restunts reverse-engineering project
+    (https://github.com/4d-stunts/restunts), which publishes no license, and
+    from the original game itself. This includes generated data tables such as
+    src/world/track_route_data.h and src/world/track_objects.cpp, and game
+    constants and tables under src/physics/.
+
+  * "Stunts", "4D Sports Driving" and any associated names, marks and logos,
+    which belong to their respective owners. This project is not affiliated
+    with, sponsored by, or endorsed by them.
+
+The contents of this file are informational and do not modify the License.

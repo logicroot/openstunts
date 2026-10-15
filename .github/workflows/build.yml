@@ -98,7 +98,7 @@ jobs:
           mkdir -p dist/OpenStunts
           cp build/stunts3d build/s3d_dump dist/OpenStunts/
           cp -r build/assets dist/OpenStunts/assets
-          cp README.md dist/OpenStunts/
+          cp README.md LICENSE NOTICE dist/OpenStunts/
           tar -C dist -czf "OpenStunts-${{ matrix.name }}.tar.gz" OpenStunts
 
       - name: Package (Windows)
@@ -109,7 +109,7 @@ jobs:
           Copy-Item build/Release/stunts3d.exe dist/OpenStunts/
           Copy-Item build/Release/s3d_dump.exe dist/OpenStunts/
           Copy-Item build/Release/assets dist/OpenStunts/assets -Recurse
-          Copy-Item README.md dist/OpenStunts/
+          Copy-Item LICENSE,NOTICE,README.md dist/OpenStunts/
           # SDL2 is a DLL on Windows; the .exe does not run without it.
           Copy-Item "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin/SDL2.dll" dist/OpenStunts/
           Compress-Archive -Path dist/OpenStunts -DestinationPath "OpenStunts-${{ matrix.name }}.zip"
@@ -120,7 +120,7 @@ jobs:
           mkdir -p dist/OpenStunts/libs
           cp build/stunts3d build/s3d_dump dist/OpenStunts/
           cp -r build/assets dist/OpenStunts/assets
-          cp README.md dist/OpenStunts/
+          cp README.md LICENSE NOTICE dist/OpenStunts/
           dylibbundler -od -b \
             -x dist/OpenStunts/stunts3d -x dist/OpenStunts/s3d_dump \
             -d dist/OpenStunts/libs -p @executable_path/libs/

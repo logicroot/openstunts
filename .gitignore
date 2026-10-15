@@ -9,8 +9,11 @@ compile_commands.json
 *.dylib
 *.dll
 *.exe
-reference/
 third_party/glm/.git
+
+# local-only porting reference: the restunts disassembly plus the original game
+# files. Never committed -- it is a spec, not part of the project.
+reference/
 
 # release packaging output (see .github/workflows/build.yml)
 /dist/

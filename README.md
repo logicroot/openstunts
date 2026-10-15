@@ -71,9 +71,9 @@ release:
 
 | Archive | Contents |
 | --- | --- |
-| `OpenStunts-linux-x86_64.tar.gz` | `stunts3d`, `s3d_dump`, `assets/`, `README.md` |
-| `OpenStunts-windows-x64.zip` | `stunts3d.exe`, `s3d_dump.exe`, `SDL2.dll`, `assets/`, `README.md` |
-| `OpenStunts-macos-arm64.zip` | `stunts3d`, `s3d_dump`, bundled SDL2 dylibs, `assets/`, `README.md` |
+| `OpenStunts-linux-x86_64.tar.gz` | `stunts3d`, `s3d_dump`, `assets/`, `README.md`, `LICENSE`, `NOTICE` |
+| `OpenStunts-windows-x64.zip` | `stunts3d.exe`, `s3d_dump.exe`, `SDL2.dll`, `assets/`, `README.md`, `LICENSE`, `NOTICE` |
+| `OpenStunts-macos-arm64.zip` | `stunts3d`, `s3d_dump`, bundled SDL2 dylibs, `assets/`, `README.md`, `LICENSE`, `NOTICE` |
 
 Every archive is self-contained: unpack it and run the binary — no Stunts
 installation and no SDL2 install needed.
@@ -294,7 +294,8 @@ src/ui        menu model + GUI drawing (font, panels, buttons)
 tools/        asset inspection CLI, asset importer
 tests         unit tests (ctest)
 .github/      CI: native Windows/Linux/macOS builds + release packaging
-reference/    copy of the restunts reverse-engineering project (spec)
+reference/    (git-ignored) local checkout of the restunts disassembly, kept
+              as the porting reference; not part of the repository
 ```
 
 ## Credits
@@ -306,3 +307,24 @@ property of their original rights holders. They are included so the project can
 be cloned and run for research, interoperability and testing purposes — and the
 DOS program files (`*.EXE`, `*.COM`, `*.DRV`) are deliberately *not*
 distributed with it.
+
+## License
+
+The original source code in this repository is licensed under the
+[Apache License 2.0](LICENSE); third-party attributions are listed in
+[`NOTICE`](NOTICE).
+
+That license covers **only** the original code. It does not cover:
+
+- the game data in [`assets/`](assets/) — copyright its original owners, and
+  included so the project can be built and run;
+- material derived from the [Restunts](https://github.com/4d-stunts/restunts)
+  disassembly (which publishes no license) or from the original game —
+  including the generated tables under `src/world/` and the game constants and
+  tables under `src/physics/`;
+- vendored third-party code, which keeps its own license: GLM
+  (`third_party/glm/copying.txt`) and stb_image_write (MIT or public domain,
+  see the header of `third_party/stb/stb_image_write.h`).
+
+"Stunts" and "4D Sports Driving" are trademarks of their respective owners;
+this project is not affiliated with or endorsed by them.
