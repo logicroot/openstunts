@@ -63,9 +63,12 @@ add_library(stunts3d_core STATIC
   src/world/material.cpp
   src/core/paths.cpp
   src/core/config.cpp
+  src/ui/menu.cpp
+  src/ui/gui.cpp
   src/game/application.cpp
   src/game/debug_track_scene.cpp
   src/game/drive_scene.cpp
+  src/game/frontend_scene.cpp
   src/game/race_state.cpp
 )
 target_include_directories(stunts3d_core PUBLIC

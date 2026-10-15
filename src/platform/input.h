@@ -16,6 +16,15 @@ struct Controls {
   bool toggle_camera = false;
   bool toggle_dashboard = false;  // edge-triggered (in-race cockpit panel)
   bool pause = false;
+
+  // Front-end menu navigation (edge-triggered: one press per key/button event).
+  // A scene maps these onto its menu; driving scenes ignore them.
+  bool menu_up = false;
+  bool menu_down = false;
+  bool menu_left = false;
+  bool menu_right = false;
+  bool menu_accept = false;  // Enter / Space / gamepad A
+  bool menu_cancel = false;  // Escape / gamepad B (back one screen)
 };
 
 class Input {

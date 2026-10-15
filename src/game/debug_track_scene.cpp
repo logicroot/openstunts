@@ -9,6 +9,7 @@
 #include "assets/shape3d.h"
 #include "core/log.h"
 #include "core/paths.h"
+#include "platform/input.h"
 #include "render/renderer.h"
 #include "render/screenshot.h"
 #include "world/car_mesh.h"
@@ -112,7 +113,12 @@ bool DebugTrackScene::on_enter() {
 }
 
 void DebugTrackScene::update(double dt, const Controls& controls) {
-  (void)controls;
+  // Escape backs out of a standalone debug view (it is no longer a hard quit in
+  // the input layer; the front-end reuses it as "back").
+  if (controls.menu_cancel) {
+    finished_ = true;
+    return;
+  }
   float speed = 6000.0f * static_cast<float>(dt);
   const Uint8* keys = SDL_GetKeyboardState(nullptr);
   if (keys[SDL_SCANCODE_LSHIFT] || keys[SDL_SCANCODE_RSHIFT]) speed *= 4.0f;

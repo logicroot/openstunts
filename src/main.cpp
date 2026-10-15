@@ -9,6 +9,7 @@
 #include "game/application.h"
 #include "game/debug_track_scene.h"
 #include "game/drive_scene.h"
+#include "game/frontend_scene.h"
 
 using namespace s3d;
 
@@ -25,6 +26,8 @@ int main(int argc, char** argv) {
   float wheel_scale_arg = 0.0f;
   bool top_down = false;
   bool drive = false;
+  bool menu = false;
+  int menu_screen = 0;
 
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
@@ -34,6 +37,8 @@ int main(int argc, char** argv) {
     else if (a == "--car" && i + 1 < argc) car_arg = argv[++i];
     else if (a == "--opp-car" && i + 1 < argc) opp_car_arg = argv[++i];
     else if (a == "--opp" && i + 1 < argc) opp_type_arg = std::atoi(argv[++i]);
+    else if (a == "--menu") menu = true;
+    else if (a == "--menu-screen" && i + 1 < argc) menu_screen = std::atoi(argv[++i]);
     else if (a == "--screenshot" && i + 1 < argc) {
       screenshot_path = argv[++i];
       if (screenshot_frame == 0) screenshot_frame = 3;
@@ -52,7 +57,9 @@ int main(int argc, char** argv) {
           "Stunts3D — 3D reimplementation of Stunts\n"
           "usage: stunts3d [--assets DIR] [--track FILE.trk] [--config FILE]\n"
           "                [--car ID] [--opp-car ID] [--opp N] [--screenshot out.png]\n"
-          "                [--frames N] [--camera N] [--wheel-scale F] [--top] [--drive]\n");
+          "                [--frames N] [--camera N] [--wheel-scale F] [--top] [--drive]\n"
+          "                [--menu] [--menu-screen N]\n"
+          "  (with no arguments the front-end menu starts)\n");
       return 0;
     } else {
       S3D_WARN("unknown argument: %s", a.c_str());
@@ -80,17 +87,49 @@ int main(int argc, char** argv) {
   Application app;
   if (!app.init(config, asset_dir)) return 1;
 
-  if (drive) {
-    auto scene = std::make_unique<DriveScene>(std::move(track), asset_dir,
+  // The front-end menu is the default; a direct capture or an explicit track /
+  // drive request bypasses it (used by the offline screenshot tooling). `--menu`
+  // forces the menu even alongside those flags.
+  const bool bypass =
+      !menu && (drive || !track_arg.empty() || top_down || !screenshot_path.empty());
+
+  app.register_scene("menu", [&config, config_path, asset_dir]() {
+    return std::make_unique<FrontEndScene>(&config, config_path, asset_dir);
+  });
+  app.register_scene("drive", [&config, asset_dir]() {
+    // "Let's Drive" from the front-end: build the race from the (now updated)
+    // selections. Escape returns to the menu instead of quitting.
+    const std::string name = config.last_track;
+    std::string path = name;
+    if (path.find('/') == std::string::npos && path.find('\\') == std::string::npos) {
+      path = path_join(asset_dir, name);
+    }
+    auto scene = std::make_unique<DriveScene>(Track::load(path), asset_dir,
                                              config.player_car, config.opponent_car,
                                              config.opponent_type, config.fov_deg,
                                              config.wheel_scale);
-    scene->set_camera_mode(camera_mode);
-    if (!screenshot_path.empty()) scene->request_screenshot(screenshot_path, screenshot_frame);
-    app.set_scene(std::move(scene));
+    scene->set_exit_scene("menu");
+    return scene;
+  });
+
+  if (bypass) {
+    if (drive) {
+      auto scene = std::make_unique<DriveScene>(std::move(track), asset_dir,
+                                               config.player_car, config.opponent_car,
+                                               config.opponent_type, config.fov_deg,
+                                               config.wheel_scale);
+      scene->set_camera_mode(camera_mode);
+      if (!screenshot_path.empty()) scene->request_screenshot(screenshot_path, screenshot_frame);
+      app.set_scene(std::move(scene));
+    } else {
+      auto scene = std::make_unique<DebugTrackScene>(std::move(track), track_path, asset_dir);
+      scene->set_top_down(top_down);
+      if (!screenshot_path.empty()) scene->request_screenshot(screenshot_path, screenshot_frame);
+      app.set_scene(std::move(scene));
+    }
   } else {
-    auto scene = std::make_unique<DebugTrackScene>(std::move(track), track_path, asset_dir);
-    scene->set_top_down(top_down);
+    auto scene = std::make_unique<FrontEndScene>(&config, config_path, asset_dir);
+    if (menu_screen != 0) scene->set_start_screen(menu_screen);
     if (!screenshot_path.empty()) scene->request_screenshot(screenshot_path, screenshot_frame);
     app.set_scene(std::move(scene));
   }

@@ -62,6 +62,12 @@ constexpr float kTrackDecalOffset = -2.0f;    // markings painted on a surface
 // dashboard STDACOUN.PVS. Overridable with --car / the config's player_car.
 constexpr const char* kDefaultPlayerCarId = "COUN";
 
+// Attract-mode demo tuning: the car counts as stalled below this speed
+// (car_actual_speed, a 16-bit physics unit) and the run restarts after it has
+// been stalled this many seconds.
+constexpr uint16_t kDemoStallSpeed = 4;
+constexpr float kDemoStallSeconds = 6.0f;
+
 // 8-bit RGB for a VGA palette index (the original draws HUD text with the
 // palette indices 15 = white and 0 = black drop shadow).
 glm::vec4 palette_color(const Palette& p, int index) {
@@ -390,24 +396,34 @@ bool DriveScene::on_enter() {
   // profile (CAR<ID>.RES) and bodywork (ST<ID>.P3S), plus an OPPn.PRE course
   // table that sets its per-element target speeds (game_opponenttype).
   have_opponent_ = false;
-  if (!opponent_car_id_.empty()) {
+  have_opponent_data_ = false;
+  // The attract demo drives the player car with the opponent autopilot, so it
+  // needs the OPPn.PRE sped table (and its course path) even without a second
+  // car. A real race loads the table only when an opponent car is selected.
+  if (!opponent_car_id_.empty() || demo_) {
     const std::string opp_pre = opponent_file(opponent_type_);
     if (!opponent_data_.load(path_join(asset_dir_, opp_pre))) {
       S3D_WARN("%s not found; no opponent", opp_pre.c_str());
     } else {
-      opponent_spec_ = load_or_default_spec(asset_dir_, opponent_car_id_);
-      opponent_collision_points_ = physics::collision_points_from_spec(opponent_spec_);
-      opponent_lib_ = std::make_shared<ShapeLibrary>();
-      if (world::load_car_archive(asset_dir_, opponent_car_id_, opponent_lib_.get())) {
-        opponent_wheel_pose_ = world::CarWheelPose{};
-        build_opponent_meshes();
-        have_opponent_ = true;
-        S3D_INFO("opponent: %s (OPP%d.PRE \"%s\")", opponent_car_id_.c_str(),
-                 opponent_type_, opponent_data_.name().c_str());
+      have_opponent_data_ = true;
+      if (!opponent_car_id_.empty()) {
+        opponent_spec_ = load_or_default_spec(asset_dir_, opponent_car_id_);
+        opponent_collision_points_ = physics::collision_points_from_spec(opponent_spec_);
+        opponent_lib_ = std::make_shared<ShapeLibrary>();
+        if (world::load_car_archive(asset_dir_, opponent_car_id_, opponent_lib_.get())) {
+          opponent_wheel_pose_ = world::CarWheelPose{};
+          build_opponent_meshes();
+          have_opponent_ = true;
+          S3D_INFO("opponent: %s (OPP%d.PRE \"%s\")", opponent_car_id_.c_str(),
+                   opponent_type_, opponent_data_.name().c_str());
+        } else {
+          opponent_lib_.reset();
+          S3D_WARN("opponent car shapes ST%s.P3S not found; no opponent",
+                   opponent_car_id_.c_str());
+        }
       } else {
-        opponent_lib_.reset();
-        S3D_WARN("opponent car shapes ST%s.P3S not found; no opponent",
-                 opponent_car_id_.c_str());
+        S3D_INFO("attract demo: autopilot on %s (OPP%d.PRE \"%s\")",
+                 car_id_.c_str(), opponent_type_, opponent_data_.name().c_str());
       }
     }
   }
@@ -602,6 +618,7 @@ bool DriveScene::on_enter() {
   }
 
   reset_car();
+  if (demo_) camera_mode_ = 1;  // attract mode always rides the chase camera
   S3D_INFO("drive scene ready");
   return true;
 }
@@ -793,6 +810,15 @@ void DriveScene::reset_car() {
   // init_game_state) and gets its first course checkpoint.
   reset_opponent_car();
 
+  // The attract demo drives the player car with the same autopilot the opponent
+  // uses; seed its first course checkpoint (sub_18D60) and clear the AI's
+  // steering-nav latch, exactly like reset_opponent_car does for the opponent.
+  if (demo_ && have_opponent_data_ && race_.route.valid()) {
+    build_opponent_path();
+    car_.car_route_flag = 1;  // field_CF
+    physics::init_opponent_checkpoint(opponent_setup(), &opponent_ai_, &car_);
+  }
+
   // Snap the camera behind the car so the first frame is already framed.
   const glm::vec3 car_pos = car_world_position(0.0f);
   camera_.position = car_pos + glm::vec3(0.0f, kFollowHeight, -kFollowDistance);
@@ -895,30 +921,42 @@ void DriveScene::physics_tick(const Controls& controls) {
   debris_prev_ = debris_;
   const int8_t crash_before = car_.car_crashBmpFlag;
 
-  uint8_t input_flags = physics::kInputNone;
-  if (controls.throttle > 0.05f) input_flags |= physics::kInputAccelerate;
-  if (controls.throttle < -0.05f) input_flags |= physics::kInputBrake;
-  if (controls.steer > 0.05f) input_flags |= physics::kInputSteerRight;
-  if (controls.steer < -0.05f) input_flags |= physics::kInputSteerLeft;
-
-  // A crashed car ignores the player: the original player_op forces the brake
-  // until the car stops (state.c).
-  physics::apply_crash_control(car_, &input_flags);
-
-  physics::update_car_speed(input_flags, spec_, &car_, physics::kGameFrameRateNormal);
-  physics::update_player_steering(input_flags, &car_, physics::kGameFrameRateNormal);
-  physics::update_grip(&car_, spec_, &track_);
   const auto sampler = [this](float wx, float wz) { return ground_sample(track_, wx, wz); };
-  physics::step_car_motion(&car_, spec_, physics::kGameFrameRateNormal, sampler, &collision_);
+  if (demo_ && have_opponent_data_) {
+    // Attract mode: the garage autopilot (game_inputmode 2) drives the player
+    // car. run_opponent_ai applies the same physics tail (speed / grip /
+    // update_player_state) the opponent uses, so no separate steering/motion
+    // pass is needed. Passing the car as its own `player` is safe: inputmode 2
+    // takes the direct-aim path (opponent_ai.cpp loc_148BA).
+    physics::OpponentRaceSetup setup = opponent_setup();
+    setup.game_inputmode = 2;
+    physics::run_opponent_ai(setup, &opponent_ai_, &car_, car_, spec_,
+                             physics::kGameFrameRateNormal, sampler, &collision_);
+  } else {
+    uint8_t input_flags = physics::kInputNone;
+    if (controls.throttle > 0.05f) input_flags |= physics::kInputAccelerate;
+    if (controls.throttle < -0.05f) input_flags |= physics::kInputBrake;
+    if (controls.steer > 0.05f) input_flags |= physics::kInputSteerRight;
+    if (controls.steer < -0.05f) input_flags |= physics::kInputSteerLeft;
 
-  // Car-vs-car collision (update_player_state loc_164B2..loc_16550): the player's
-  // box against the opponent's. The player runs first, so it tests the
-  // opponent's pose from before this frame's AI tick; the opponent's own pass
-  // (below) then tests the player's updated pose, matching player_op ->
-  // opponent_op. Without an opponent there is nothing to collide with.
-  if (have_opponent_) {
-    physics::car_car_resolve(&car_, player_collision_points_, &opponent_,
-                             opponent_collision_points_);
+    // A crashed car ignores the player: the original player_op forces the brake
+    // until the car stops (state.c).
+    physics::apply_crash_control(car_, &input_flags);
+
+    physics::update_car_speed(input_flags, spec_, &car_, physics::kGameFrameRateNormal);
+    physics::update_player_steering(input_flags, &car_, physics::kGameFrameRateNormal);
+    physics::update_grip(&car_, spec_, &track_);
+    physics::step_car_motion(&car_, spec_, physics::kGameFrameRateNormal, sampler, &collision_);
+
+    // Car-vs-car collision (update_player_state loc_164B2..loc_16550): the player's
+    // box against the opponent's. The player runs first, so it tests the
+    // opponent's pose from before this frame's AI tick; the opponent's own pass
+    // (below) then tests the player's updated pose, matching player_op ->
+    // opponent_op. Without an opponent there is nothing to collide with.
+    if (have_opponent_) {
+      physics::car_car_resolve(&car_, player_collision_points_, &opponent_,
+                               opponent_collision_points_);
+    }
   }
 
   // Crash debris (state_op_unk): a hard enough wall hit throws off a burst of
@@ -1030,8 +1068,10 @@ void DriveScene::physics_tick(const Controls& controls) {
   // Finish-line test (state.c loc_17771): the run only finishes once the car
   // has returned to route node 0 after passing another node (playerstate
   // field_CD). On the forward crossing the original calls update_crash_state(3,
-  // 0), which sets car_crashBmpFlag = 3 and records game_total_finish.
-  if (race_.update_finish(car_.car_position.x, car_.car_position.z, start_finish_)) {
+  // 0), which sets car_crashBmpFlag = 3 and records game_total_finish. The
+  // attract demo never finishes, so it loops laps instead.
+  if (!demo_ &&
+      race_.update_finish(car_.car_position.x, car_.car_position.z, start_finish_)) {
     car_.car_crashBmpFlag = physics::kCrashEventFinish;
     S3D_INFO("finish: %s", game::format_race_time(race_.total_finish, 20, true).c_str());
   }
@@ -1039,15 +1079,18 @@ void DriveScene::physics_tick(const Controls& controls) {
   // Checkpoint/arrow machine (state.c loc_173B3..loc_17699): tracks the
   // checkpoint points ahead of the car to drive the HUD arrow (field_45D) and
   // to clear the wrong-way latch once the car is heading the right way again.
-  game::CarPose pose;
-  pose.x = car_.car_position.x;
-  pose.y = car_.car_position.y;
-  pose.z = car_.car_position.z;
-  pose.rot_x = car_.car_rotate.x;  // yaw
-  pose.rot_y = car_.car_rotate.y;  // pitch
-  pose.rot_z = car_.car_rotate.z;  // roll
-  pose.crashed = car_.car_crashBmpFlag != 0;
-  race_.update_checkpoint(track_, pose);
+  // The demo has no HUD and must not be teleported by the wrong-way reset.
+  if (!demo_) {
+    game::CarPose pose;
+    pose.x = car_.car_position.x;
+    pose.y = car_.car_position.y;
+    pose.z = car_.car_position.z;
+    pose.rot_x = car_.car_rotate.x;  // yaw
+    pose.rot_y = car_.car_rotate.y;  // pitch
+    pose.rot_z = car_.car_rotate.z;  // roll
+    pose.crashed = car_.car_crashBmpFlag != 0;
+    race_.update_checkpoint(track_, pose);
+  }
 
   // Crash debris motion (sub_19BA0), gated on "any piece live" (field_42A).
   if (debris_.any_active()) {
@@ -1115,6 +1158,12 @@ void DriveScene::update_camera() {
 }
 
 void DriveScene::update(double dt, const Controls& controls) {
+  // Escape backs out of a standalone drive; from the front-end the exit scene
+  // is "menu" (set via set_exit_scene) so it returns to the menu instead.
+  if (controls.menu_cancel) {
+    finished_ = true;
+    return;
+  }
   if (controls.reset_car) reset_car();
   // handle_ingame_kb_shortcuts: 'D' toggles the cockpit dashboard.
   if (controls.toggle_dashboard && dashboard_.valid()) {
@@ -1123,6 +1172,17 @@ void DriveScene::update(double dt, const Controls& controls) {
   // 'C' cycles camera modes (original).
   if (controls.toggle_camera) {
     camera_mode_ = (camera_mode_ + 1) % 4;
+  }
+
+  // The attract autopilot can wedge the car on a wall; restart the demo run
+  // after a few seconds of (near) standstill so the background keeps moving.
+  if (demo_) {
+    const bool stalled = car_.car_actual_speed < kDemoStallSpeed;
+    demo_stall_seconds_ = stalled ? demo_stall_seconds_ + static_cast<float>(dt) : 0.0f;
+    if (demo_stall_seconds_ > kDemoStallSeconds) {
+      reset_car();
+      demo_stall_seconds_ = 0.0f;
+    }
   }
 
   accumulator_ += dt;
@@ -1805,21 +1865,24 @@ void DriveScene::render(Renderer& renderer, int width, int height) {
     }
   }
 
-  glm::vec4 car_rect;
-  const bool has_car_rect =
-      car_screen_rect(render_cam, alpha, width, height, &car_rect);
-  glm::vec4 opponent_rect;
-  const bool has_opponent_rect =
-      opponent_screen_rect(render_cam, alpha, width, height, &opponent_rect);
+  // The attract demo shows a clean chase view: no race HUD, no cockpit.
+  if (!demo_) {
+    glm::vec4 car_rect;
+    const bool has_car_rect =
+        car_screen_rect(render_cam, alpha, width, height, &car_rect);
+    glm::vec4 opponent_rect;
+    const bool has_opponent_rect =
+        opponent_screen_rect(render_cam, alpha, width, height, &opponent_rect);
 
-  std::vector<Vertex> hud;
-  build_hud(hud, width, height, has_car_rect ? &car_rect : nullptr,
-            has_opponent_rect ? &opponent_rect : nullptr);
-  hud_.draw(hud, width, height);
+    std::vector<Vertex> hud;
+    build_hud(hud, width, height, has_car_rect ? &car_rect : nullptr,
+              has_opponent_rect ? &opponent_rect : nullptr);
+    hud_.draw(hud, width, height);
 
-  // The cockpit panel goes last so it masks the world and HUD outside the
-  // windshield (seg005.asm loop_game composites it over the 3D band).
-  draw_dashboard(width, height);
+    // The cockpit panel goes last so it masks the world and HUD outside the
+    // windshield (seg005.asm loop_game composites it over the 3D band).
+    draw_dashboard(width, height);
+  }
 
   ++frame_index_;
   if (!screenshot_path_.empty() && frame_index_ >= screenshot_frame_) {

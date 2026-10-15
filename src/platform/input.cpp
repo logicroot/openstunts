@@ -12,6 +12,12 @@ void Input::begin_frame() {
   controls_.toggle_camera = false;
   controls_.toggle_dashboard = false;
   controls_.pause = false;
+  controls_.menu_up = false;
+  controls_.menu_down = false;
+  controls_.menu_left = false;
+  controls_.menu_right = false;
+  controls_.menu_accept = false;
+  controls_.menu_cancel = false;
   mouse_dx_ = mouse_dy_ = 0.0f;
 
   float throttle = 0.0f;
@@ -32,7 +38,9 @@ void Input::handle_event(const SDL_Event& e) {
 
   if (e.type == SDL_KEYDOWN && e.key.repeat == 0) {
     switch (e.key.keysym.sym) {
-      case SDLK_ESCAPE: quit_ = true; break;
+      // Escape is no longer a hard quit: it is the menu "back" action. Scenes
+      // decide what it does (the front-end pops a screen, a race quits).
+      case SDLK_ESCAPE: controls_.menu_cancel = true; break;
       case SDLK_z: controls_.gear_down = true; break;
       case SDLK_x: controls_.gear_up = true; break;
       case SDLK_r: controls_.reset_car = true; break;
@@ -42,6 +50,28 @@ void Input::handle_event(const SDL_Event& e) {
       // used instead.
       case SDLK_TAB: controls_.toggle_dashboard = true; break;
       case SDLK_p: controls_.pause = true; break;
+
+      // Menu navigation (also mirrored by the gamepad below).
+      case SDLK_UP: controls_.menu_up = true; break;
+      case SDLK_DOWN: controls_.menu_down = true; break;
+      case SDLK_LEFT: controls_.menu_left = true; break;
+      case SDLK_RIGHT: controls_.menu_right = true; break;
+      case SDLK_RETURN:
+      case SDLK_KP_ENTER:
+      case SDLK_SPACE: controls_.menu_accept = true; break;
+      default: break;
+    }
+  }
+
+  // Gamepad menu nav: D-pad + A/B (first connected controller).
+  if (e.type == SDL_CONTROLLERBUTTONDOWN) {
+    switch (e.cbutton.button) {
+      case SDL_CONTROLLER_BUTTON_DPAD_UP: controls_.menu_up = true; break;
+      case SDL_CONTROLLER_BUTTON_DPAD_DOWN: controls_.menu_down = true; break;
+      case SDL_CONTROLLER_BUTTON_DPAD_LEFT: controls_.menu_left = true; break;
+      case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: controls_.menu_right = true; break;
+      case SDL_CONTROLLER_BUTTON_A: controls_.menu_accept = true; break;
+      case SDL_CONTROLLER_BUTTON_B: controls_.menu_cancel = true; break;
       default: break;
     }
   }

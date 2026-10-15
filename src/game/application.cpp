@@ -57,6 +57,10 @@ void Application::set_scene(std::unique_ptr<Scene> scene) {
   if (scene_) scene_->on_enter();
 }
 
+void Application::register_scene(const std::string& name, SceneFactory factory) {
+  scene_factories_[name] = std::move(factory);
+}
+
 void Application::run() {
   running_ = true;
   Uint32 last_ticks = SDL_GetTicks();
@@ -97,7 +101,16 @@ void Application::run() {
 
     if (!scene_) break;
     const std::string next = scene_->next_scene();
-    if (!next.empty()) break;  // scene switching implemented in a later milestone
+    if (!next.empty()) {
+      if (next == "quit") break;
+      auto it = scene_factories_.find(next);
+      if (it == scene_factories_.end()) {
+        S3D_WARN("no scene registered as '%s'", next.c_str());
+        break;
+      }
+      set_scene(it->second());
+      if (!scene_) break;
+    }
 
     ++frames;
     fps_timer += static_cast<float>(wall_seconds);

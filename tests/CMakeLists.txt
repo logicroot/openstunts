@@ -29,6 +29,8 @@ add_executable(s3d_tests
   camera_test.cpp
   skybox_test.cpp
   dashboard_test.cpp
+  menu_test.cpp
+  block_texture_test.cpp
 )
 target_link_libraries(s3d_tests PRIVATE stunts3d_core)
 target_include_directories(s3d_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

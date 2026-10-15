@@ -84,12 +84,20 @@ void HudRenderer::shutdown() {
 }
 
 void HudRenderer::draw(const std::vector<Vertex>& verts, int drawable_width,
-                       int drawable_height) {
+                       int drawable_height, bool blend) {
   if (verts.empty() || drawable_width <= 0 || drawable_height <= 0) return;
   mesh_.upload(verts);
 
   glDisable(GL_DEPTH_TEST);
   glDisable(GL_CULL_FACE);
+  if (blend) {
+    // Straight alpha: the front-end's dim overlay and translucent panels let
+    // the scene behind them show through.
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  } else {
+    glDisable(GL_BLEND);
+  }
   shader_.use();
   const glm::mat4 ortho = glm::ortho(0.0f, static_cast<float>(drawable_width),
                                      static_cast<float>(drawable_height), 0.0f,

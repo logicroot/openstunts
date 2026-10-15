@@ -56,10 +56,22 @@ class DriveScene : public Scene {
   // the original's 'C' key cycles. Exposed so screenshots can pick a view.
   void set_camera_mode(int mode) { camera_mode_ = mode; }
 
+  // Attract-mode demo: an AI autopilot (game_inputmode 2, the original's garage
+  // autopilot) drives the player car, the race HUD/dashboard is hidden, the
+  // finish line never ends the run and a stalled car is restarted. Used as the
+  // front-end's background.
+  void set_demo(bool on) { demo_ = on; }
+  bool demo() const { return demo_; }
+
+  // Scene to enter when the run finishes (default "quit").
+  void set_exit_scene(std::string name) { exit_scene_ = std::move(name); }
+
   // Render `frames` frames, then write a PNG and quit (CI/verification).
   void request_screenshot(std::string path, int frames);
 
-  std::string next_scene() const override { return finished_ ? "quit" : std::string(); }
+  std::string next_scene() const override {
+    return finished_ ? exit_scene_ : std::string();
+  }
 
  private:
   void reset_car();
@@ -212,6 +224,9 @@ class DriveScene : public Scene {
   std::string opponent_car_id_;  // upper-cased car id (e.g. "VETT")
   int opponent_type_ = 1;        // OPPn.PRE index (1..6)
   bool have_opponent_ = false;
+  // True once OPPn.PRE loaded. The attract demo needs the sped table for its
+  // course path even though it fields no opponent car.
+  bool have_opponent_data_ = false;
   OpponentData opponent_data_;
   CarSpec opponent_spec_;
   physics::CarState opponent_;
@@ -323,6 +338,11 @@ class DriveScene : public Scene {
   int screenshot_frame_ = 0;
   int frame_index_ = 0;
   bool finished_ = false;
+
+  // Attract-mode demo (front-end background): the AI drives the player car.
+  bool demo_ = false;
+  std::string exit_scene_ = "quit";  // scene to enter when finished_
+  float demo_stall_seconds_ = 0.0f;  // how long the demo car has been stalled
 };
 
 }  // namespace s3d

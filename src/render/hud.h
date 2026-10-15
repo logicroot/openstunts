@@ -29,9 +29,10 @@ class HudRenderer {
   void shutdown();
 
   // verts are in pixels; origin top-left. Depth testing is disabled for the
-  // draw, so call this last.
+  // draw, so call this last. Pass `blend` to alpha-blend the quads over what is
+  // already in the framebuffer (used by the front-end's dim overlay).
   void draw(const std::vector<Vertex>& verts, int drawable_width,
-            int drawable_height);
+            int drawable_height, bool blend = false);
 
  private:
   Shader shader_;

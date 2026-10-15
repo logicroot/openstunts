@@ -3,6 +3,8 @@
 
 #include <memory>
 #include <string>
+#include <functional>
+#include <map>
 
 #include "core/config.h"
 #include "core/fixed_timestep.h"
@@ -32,6 +34,12 @@ class Application {
 
   void set_scene(std::unique_ptr<Scene> scene);
 
+  // Registers a scene factory under `name`. When the active scene's
+  // next_scene() returns this name, the application constructs the factory's
+  // scene and enters it. The special name "quit" stops the loop.
+  using SceneFactory = std::function<std::unique_ptr<Scene>()>;
+  void register_scene(const std::string& name, SceneFactory factory);
+
   // Advance the simulation by a fixed step per rendered frame instead of by the
   // wall clock, making an offline capture reproducible. Used by the screenshot
   // path. Must be set before run().
@@ -45,6 +53,7 @@ class Application {
   Input input_;
   FixedTimestep timestep_{60.0};
   std::unique_ptr<Scene> scene_;
+  std::map<std::string, SceneFactory> scene_factories_;
   bool running_ = false;
   bool deterministic_ = false;
 };
