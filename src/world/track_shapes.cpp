@@ -211,7 +211,7 @@ void build_track_shape_geometry_impl(const Track& track, const ShapeLibrary& lib
         // road) are routed to the decal layer so they win the depth test against
         // the surface they are drawn on, as in the original.
         append_shape(surface, *s, fixed_model(pos, def.rot_y), paint_color, material, lines,
-                     layers.decal, true);
+                     layers.decal);
         if (animated) {
           ++local.animated;
         } else {
@@ -230,7 +230,7 @@ void build_track_shape_geometry_impl(const Track& track, const ShapeLibrary& lib
             // The overlay object can itself be a surface with markings (the
             // finish line's road piece), so route its markings on too.
             append_shape(overlay, *os, fixed_model(pos, orot), paint_color, material, lines,
-                         layers.decal, true);
+                         layers.decal);
             ++local.overlays;
           } else {
             ++local.missing_shapes;

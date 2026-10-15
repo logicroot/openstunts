@@ -9,13 +9,6 @@ namespace s3d::world {
 
 namespace {
 
-// Seam fix tuning (see append_shape). A wall top edge coplanar with a
-// horizontal face is dropped by `kSeamDrop` world units unless another polygon
-// is found within `kSeamPlaneEps` of the probe point `kSeamProbeUp` above it.
-constexpr float kSeamDrop = 2.0f;
-constexpr float kSeamProbeUp = 2.0f;
-constexpr float kSeamPlaneEps = 0.5f;
-
 glm::vec3 transform_point(const glm::mat4& m, const Vec3i& v) {
   return glm::vec3(m * glm::vec4(static_cast<float>(v.x), static_cast<float>(v.y),
                                  static_cast<float>(v.z), 1.0f));
@@ -25,45 +18,6 @@ glm::vec3 face_normal(const glm::vec3& a, const glm::vec3& b, const glm::vec3& c
   const glm::vec3 n = glm::cross(b - a, c - a);
   const float len = glm::length(n);
   return (len > 1e-6f) ? n / len : glm::vec3(0.0f, 1.0f, 0.0f);
-}
-
-// Newell's method: stable normal for an arbitrary (planar) polygon, unlike the
-// first-triangle cross product which collapses on degenerate first edges.
-glm::vec3 polygon_normal(const std::vector<glm::vec3>& p) {
-  glm::vec3 n(0.0f);
-  for (size_t i = 0; i < p.size(); ++i) {
-    const glm::vec3& a = p[i];
-    const glm::vec3& b = p[(i + 1) % p.size()];
-    n.x += (a.y - b.y) * (a.z + b.z);
-    n.y += (a.z - b.z) * (a.x + b.x);
-    n.z += (a.x - b.x) * (a.y + b.y);
-  }
-  const float len = glm::length(n);
-  return (len > 1e-6f) ? n / len : glm::vec3(0.0f, 1.0f, 0.0f);
-}
-
-// True when `p` lies inside the planar polygon `poly` (within `plane_eps` of its
-// plane). Used to test whether something sits directly above a wall's top edge.
-bool point_in_planar_polygon(const std::vector<glm::vec3>& poly, const glm::vec3& p,
-                             float plane_eps) {
-  if (poly.size() < 3) return false;
-  const glm::vec3 n = polygon_normal(poly);
-  if (std::abs(glm::dot(n, p - poly[0])) > plane_eps) return false;
-  const glm::vec3 ref = (std::abs(n.x) < 0.9f) ? glm::vec3(1.0f, 0.0f, 0.0f)
-                                               : glm::vec3(0.0f, 1.0f, 0.0f);
-  const glm::vec3 u = glm::normalize(ref - n * glm::dot(ref, n));
-  const glm::vec3 v = glm::cross(n, u);
-  const glm::vec2 q(glm::dot(p - poly[0], u), glm::dot(p - poly[0], v));
-  bool inside = false;
-  for (size_t i = 0, j = poly.size() - 1; i < poly.size(); j = i++) {
-    const glm::vec2 a(glm::dot(poly[i] - poly[0], u), glm::dot(poly[i] - poly[0], v));
-    const glm::vec2 b(glm::dot(poly[j] - poly[0], u), glm::dot(poly[j] - poly[0], v));
-    if (((a.y > q.y) != (b.y > q.y)) &&
-        (q.x < (b.x - a.x) * (q.y - a.y) / (b.y - a.y) + a.x)) {
-      inside = !inside;
-    }
-  }
-  return inside;
 }
 
 // Smallest circle enclosing a set of 2D points. The wheel primitive only ever
@@ -203,7 +157,7 @@ void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
 
 void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
                   const PaintColorFn& color_for, int material, MeshBuilder* line_out,
-                  MeshBuilder* decal_out, bool fix_wall_seams) {
+                  MeshBuilder* decal_out) {
   // Pre-transform all vertices once.
   std::vector<glm::vec3> pts(shape.vertices.size());
   for (size_t i = 0; i < shape.vertices.size(); ++i) {
@@ -212,29 +166,6 @@ void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
 
   // Decal routing only makes sense when the caller gave a distinct buffer.
   const bool route_decals = decal_out != nullptr && decal_out != &mb;
-
-  // Seam fix (see the header): a vertical wall whose top edge is coplanar with a
-  // horizontal face of the same shape pokes through that face as a one-pixel line
-  // when the shape is tiled. Precompute each polygon's normal and the heights of
-  // the shape's horizontal faces so the emit loop can spot and drop those edges.
-  std::vector<glm::vec3> prim_normal(shape.primitives.size());
-  std::vector<char> prim_planar(shape.primitives.size(), 0);
-  std::vector<float> horizontal_heights;
-  if (fix_wall_seams) {
-    for (size_t i = 0; i < shape.primitives.size(); ++i) {
-      const ShapePrimitive& q = shape.primitives[i];
-      if (q.kind != PrimKind::Polygon || q.type == 12 || q.indices.size() < 3) continue;
-      std::vector<glm::vec3> qp;
-      qp.reserve(q.indices.size());
-      for (uint8_t idx : q.indices) {
-        if (idx < pts.size()) qp.push_back(pts[idx]);
-      }
-      if (qp.size() < 3) continue;
-      prim_normal[i] = polygon_normal(qp);
-      prim_planar[i] = 1;
-      if (std::abs(prim_normal[i].y) > 0.9f) horizontal_heights.push_back(qp[0].y);
-    }
-  }
 
   // Classify each polygon once: small polygons lying on a larger one of the same
   // shape are the markings an element paints over its own surface. (The originals
@@ -408,54 +339,6 @@ void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
     if (is_decal && decal_host[prim_index] >= 0) {
       normal_override = &info[static_cast<size_t>(decal_host[prim_index])].normal;
     }
-
-    // Seam fix: a vertical wall whose top edge is coplanar with one of the
-    // shape's horizontal faces would leak through that face as a thin line once
-    // the shape is tiled edge to edge. Unless another primitive continues
-    // upwards just above that edge (the rim standing on a kerb), drop the top
-    // edge a hair so the horizontal face reliably covers it.
-    if (fix_wall_seams && !is_decal && prim_planar[prim_index] &&
-        std::abs(prim_normal[prim_index].y) < 0.15f && !horizontal_heights.empty()) {
-      float top = poly[0].y;
-      for (const glm::vec3& p : poly) top = std::max(top, p.y);
-      bool coplanar = false;
-      for (float h : horizontal_heights) {
-        if (std::abs(h - top) < 0.5f) {
-          coplanar = true;
-          break;
-        }
-      }
-      if (coplanar) {
-        glm::vec3 edge(0.0f);
-        int edge_verts = 0;
-        for (const glm::vec3& p : poly) {
-          if (p.y > top - 0.5f) {
-            edge += p;
-            ++edge_verts;
-          }
-        }
-        bool supported = false;
-        if (edge_verts > 0) {
-          edge /= static_cast<float>(edge_verts);
-          const glm::vec3 probe = edge + glm::vec3(0.0f, kSeamProbeUp, 0.0f);
-          for (size_t j = 0; j < shape.primitives.size() && !supported; ++j) {
-            if (j == prim_index || !prim_planar[j]) continue;
-            std::vector<glm::vec3> other;
-            other.reserve(shape.primitives[j].indices.size());
-            for (uint8_t idx : shape.primitives[j].indices) {
-              if (idx < pts.size()) other.push_back(pts[idx]);
-            }
-            supported = point_in_planar_polygon(other, probe, kSeamPlaneEps);
-          }
-        }
-        if (!supported) {
-          for (glm::vec3& p : poly) {
-            if (p.y > top - 0.5f) p.y -= kSeamDrop;
-          }
-        }
-      }
-    }
-
     append_polygon(target, poly, color, normal_override);
   }
 }
