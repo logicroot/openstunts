@@ -224,8 +224,12 @@ void FrontEndScene::build_menu() {
       items.push_back({"Done"});
       items.push_back({"Next"});
       items.push_back({"Last"});
+      // Auto/Manual Transmission is wider than the button at this font size,
+      // so it is a value row (as the original shows the setting) with the
+      // transmission value on the right.
       ui::MenuItem trans;
-      trans.label = "Auto / Manual Transmission";
+      trans.label = "Transmission";
+      trans.values = {"Auto", "Manual"};
       trans.enabled = false;  // placeholder
       items.push_back(std::move(trans));
       ui::MenuItem colour;
@@ -690,7 +694,9 @@ FrontEndScene::PanelLayout FrontEndScene::panel_layout() const {
   PanelLayout p;
   p.title_h = 58.0f;
   p.hint_h = 26.0f;
-  p.w = 420.0f;
+  // Wide enough for the longest label + value pair at this font size
+  // ("Patterned Surfaces" / "1280x720") without the two colliding.
+  p.w = 520.0f;
 
   // Shrink the rows when a long list would overflow the viewport (the Car
   // screen has enough rows to need this on a short window).
