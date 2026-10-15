@@ -8,7 +8,7 @@
 namespace s3d {
 
 struct WindowConfig {
-  std::string title = "Stunts3D";
+  std::string title = "OpenStunts";
   int width = 1280;
   int height = 720;
   bool vsync = true;

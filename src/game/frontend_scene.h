@@ -77,6 +77,14 @@ class FrontEndScene : public Scene {
   void set_opponent(int index);
   void cycle_opponent(int delta);
 
+  // Programmatically trigger menu navigation (for deterministic testing).
+  void inject_menu_up();
+  void inject_menu_down();
+  void inject_menu_left();
+  void inject_menu_right();
+  void inject_menu_accept();
+  void inject_menu_cancel();
+
   // Track label for menus: hide the ".TRK" extension. Public for unit tests.
   static std::string track_label(const std::string& file);
 

@@ -54,7 +54,7 @@ int main(int argc, char** argv) {
       top_down = true;
     } else if (a == "--help" || a == "-h") {
       std::printf(
-          "Stunts3D — 3D reimplementation of Stunts\n"
+          "OpenStunts — 3D reimplementation of Stunts\n"
           "usage: stunts3d [--assets DIR] [--track FILE.trk] [--config FILE]\n"
           "                [--car ID] [--opp-car ID] [--opp N] [--screenshot out.png]\n"
           "                [--frames N] [--camera N] [--wheel-scale F] [--top] [--drive]\n"

@@ -1,4 +1,4 @@
-# Stunts3D
+# OpenStunts
 
 A cross-platform, modernized 3D reimplementation of the classic DOS racing game
 **Stunts / 4D Sports Driving** (Distinctive Software / Brøderbund, 1990).

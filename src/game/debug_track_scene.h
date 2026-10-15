@@ -30,6 +30,7 @@ class DebugTrackScene : public Scene {
   // framebuffer (so a side panel does not cover it) and centre the track there.
   // 0 (the default) keeps the whole framebuffer.
   void set_overview_width(float width_px) { overview_w_ = width_px; }
+  void set_overview_rotated(bool rotated) { overview_rotated_ = rotated; }
 
   std::string next_scene() const override { return finished_ ? "quit" : std::string(); }
 
@@ -54,6 +55,7 @@ class DebugTrackScene : public Scene {
   float overview_w_ = 0.0f;
   glm::vec3 top_down_target_{0.0f};
   bool top_down_ = false;
+  bool overview_rotated_ = false;
   bool finished_ = false;
 
   // Place the top-down camera so the whole track fits the `usable_width` pixels

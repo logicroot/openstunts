@@ -96,7 +96,7 @@ bool Config::save(const std::string& path) const {
     S3D_WARN("config: cannot write %s", p.c_str());
     return false;
   }
-  out << "# Stunts3D settings\n";
+  out << "# OpenStunts settings\n";
   out << "width = " << width << "\n";
   out << "height = " << height << "\n";
   out << "vsync = " << (vsync ? 1 : 0) << "\n";

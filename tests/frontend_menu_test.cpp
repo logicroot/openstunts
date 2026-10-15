@@ -281,3 +281,43 @@ TEST(frontend_pointer_ignored_during_capture) {
   scene.pointer_event(1280, 720, p.x_center, row_y(p, 2), /*click=*/true, /*moved=*/true);
   EXPECT_EQ(scene.menu().selected(), 0);
 }
+
+// Programmatic navigation: the front-end exposes inject_* so menu journeys can
+// be driven deterministically (tests, screenshot tooling) without SDL events.
+TEST(frontend_inject_navigation) {
+  Config config;
+  FrontEndScene scene(&config, "", "/nonexistent");
+  scene.select_screen(0);  // main: builds the menu without touching GL
+  EXPECT_EQ(scene.menu().size(), 6);  // Let's Drive .. Exit
+  EXPECT_EQ(scene.menu().selected(), 0);
+
+  scene.inject_menu_down();
+  EXPECT_EQ(scene.menu().selected(), 1);  // "Tracks"
+
+  scene.inject_menu_accept();
+  EXPECT_EQ(scene.menu().size(), 3);  // More Tracks / New-Edit / Main Menu
+  EXPECT_EQ(scene.menu().selected(), 0);
+
+  // Wrapping skips the disabled placeholder row.
+  scene.inject_menu_down();
+  EXPECT_EQ(scene.menu().selected(), 2);
+
+  scene.inject_menu_cancel();
+  EXPECT_EQ(scene.menu().size(), 6);  // back on the main screen
+}
+
+// Value rows respond to Left/Right; the change is written to the config.
+TEST(frontend_inject_cycles_value) {
+  Config config;
+  config.fullscreen = false;
+  FrontEndScene scene(&config, "", "/nonexistent");
+  scene.select_screen(4);  // Options
+  EXPECT_EQ(scene.menu().selected(), 0);
+
+  scene.inject_menu_down();  // Fullscreen
+  EXPECT_EQ(scene.menu().selected(), 1);
+  scene.inject_menu_right();
+  EXPECT_TRUE(config.fullscreen);
+  scene.inject_menu_left();
+  EXPECT_TRUE(!config.fullscreen);
+}

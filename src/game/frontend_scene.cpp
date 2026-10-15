@@ -169,7 +169,7 @@ void FrontEndScene::scan_cars() {
 
 std::string FrontEndScene::screen_title() const {
   switch (screen_) {
-    case Screen::kMain: return "STUNTS3D";
+    case Screen::kMain: return "OpenStunts";
     case Screen::kTracks: return "Select Track";
     case Screen::kCar:
       return car_target_ == CarTarget::kPlayer ? "Select Car" : "Opponent Car";
@@ -182,6 +182,9 @@ std::string FrontEndScene::screen_title() const {
 void FrontEndScene::set_screen(Screen s) {
   screen_ = s;
   build_menu();
+  // A new screen starts focused on its first row (landing on an enabled row),
+  // not on whatever row happened to be selected on the previous screen.
+  menu_.set_selected(0);
   on_selection_changed();
 }
 
@@ -313,6 +316,13 @@ void FrontEndScene::on_selection_changed() {
   }
 }
 
+void FrontEndScene::inject_menu_up() { Controls c{}; c.menu_up = true; handle_input(c); }
+void FrontEndScene::inject_menu_down() { Controls c{}; c.menu_down = true; handle_input(c); }
+void FrontEndScene::inject_menu_left() { Controls c{}; c.menu_left = true; handle_input(c); }
+void FrontEndScene::inject_menu_right() { Controls c{}; c.menu_right = true; handle_input(c); }
+void FrontEndScene::inject_menu_accept() { Controls c{}; c.menu_accept = true; handle_input(c); }
+void FrontEndScene::inject_menu_cancel() { Controls c{}; c.menu_cancel = true; handle_input(c); }
+
 void FrontEndScene::handle_input(const Controls& controls) {
   if (controls.menu_up) {
     menu_.move_up();
@@ -349,6 +359,7 @@ void FrontEndScene::select_screen(int screen) {
   if (screen < 0 || screen > static_cast<int>(Screen::kOptions)) return;
   screen_ = static_cast<Screen>(screen);
   build_menu();
+  menu_.set_selected(0);  // like set_screen, but without building previews (no GL)
 }
 
 void FrontEndScene::layout_rows(const PanelLayout& layout) {
@@ -594,7 +605,7 @@ void FrontEndScene::ensure_demo() {
     demo_track = tracks_.front();
   }
   Track track = Track::load(path_join(asset_dir_, demo_track));
-  auto demo = std::make_unique<DriveScene>(std::move(track), asset_dir_, kDemoCar, "", 1,
+  auto demo = std::make_unique<DriveScene>(std::move(track), asset_dir_, kDemoCar, "", 5,
                                            config_ ? config_->fov_deg : 80.0f,
                                            config_ ? config_->wheel_scale : 1.25f);
   demo->set_demo(true);
@@ -844,8 +855,10 @@ void FrontEndScene::render_overlay(int width, int height) {
   const float cx = layout.x + layout.w * 0.5f;
 
   if (screen_ == Screen::kMain) gui_.scrim();
-  gui_.title_centered(screen_title(), cx, layout.y + 12.0f);
+  // The panel background must be laid down before its title: it is translucent,
+  // so drawing it afterwards would tint the title text grey.
   gui_.panel(layout.x, layout.y, layout.w, layout.h);
+  gui_.title_centered(screen_title(), cx, layout.y + 12.0f);
 
   const float pad = gui_.theme().padding;
   const int rows = menu_.size();
@@ -886,6 +899,7 @@ void FrontEndScene::render(Renderer& renderer, int width, int height) {
       if (track_preview_) {
         // Keep the map clear of the menu panel on the right.
         track_preview_->set_overview_width(panel_layout().x * gui_.scale());
+        track_preview_->set_overview_rotated(true);
         track_preview_->render(renderer, width, height);
       }
       break;

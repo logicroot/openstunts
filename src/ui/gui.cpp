@@ -101,10 +101,10 @@ void Gui::begin(int drawable_width, int drawable_height) {
 }
 
 float Gui::text_px() const {
-  // Scale the bitmap font to roughly 20 logical pixels tall, but never below a
+  // Scale the bitmap font to roughly 16 logical pixels tall, but never below a
   // 2x nearest-neighbour blit so it keeps an integer pixel look.
   const int rows = font_.valid() ? font_.rows() : 8;
-  const float target = 20.0f;
+  const float target = 16.0f;
   return std::max(2.0f, std::round(target / static_cast<float>(rows)));
 }
 

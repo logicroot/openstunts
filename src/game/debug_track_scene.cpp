@@ -151,7 +151,12 @@ void DebugTrackScene::fit_top_down_camera(float usable_width, float view_width,
   const float need_h =
       half_extent * margin * view_width / std::max(usable_width, 1.0f) / tan_h;
   const float height_needed = std::max(need_h, need_v);
-  camera_.position = glm::vec3(cx, height_needed, cz + height_needed * (3000.0f / 18000.0f));
+  const float offset = height_needed * (3000.0f / 18000.0f);
+  if (overview_rotated_) {
+    camera_.position = glm::vec3(cx, height_needed, cz - offset);
+  } else {
+    camera_.position = glm::vec3(cx, height_needed, cz + offset);
+  }
   aim_at(camera_, glm::vec3(cx, 0.0f, cz));
   top_down_target_ = glm::vec3(cx, 0.0f, cz);
 }
