@@ -26,6 +26,11 @@ class DebugTrackScene : public Scene {
   // Start with a top-down overview camera (useful for inspecting track layout).
   void set_top_down(bool value) { top_down_ = value; }
 
+  // Restrict the top-down overview to the leftmost `width_px` pixels of the
+  // framebuffer (so a side panel does not cover it) and centre the track there.
+  // 0 (the default) keeps the whole framebuffer.
+  void set_overview_width(float width_px) { overview_w_ = width_px; }
+
   std::string next_scene() const override { return finished_ ? "quit" : std::string(); }
 
  private:
@@ -42,8 +47,19 @@ class DebugTrackScene : public Scene {
   int hotkey_shots_ = 0;
   bool mouse_look_ = false;
   bool pending_hotkey_ = false;
+  // Track the last viewport size for top-down camera fitting.
+  float fit_w_ = 0.0f;
+  float fit_vw_ = 0.0f;
+  float fit_h_ = 0.0f;
+  float overview_w_ = 0.0f;
+  glm::vec3 top_down_target_{0.0f};
   bool top_down_ = false;
   bool finished_ = false;
+
+  // Place the top-down camera so the whole track fits the `usable_width` pixels
+  // of a `view_width`-wide framebuffer without clipping. The standalone debug
+  // view allows WASD movement, so the fit runs only when the viewport changes.
+  void fit_top_down_camera(float usable_width, float view_width, float height);
 };
 
 }  // namespace s3d

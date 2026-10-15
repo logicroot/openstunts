@@ -133,13 +133,59 @@ void DebugTrackScene::update(double dt, const Controls& controls) {
   if (keys[SDL_SCANCODE_Q]) camera_.move(glm::vec3(0.0f, -speed, 0.0f));
 }
 
+void DebugTrackScene::fit_top_down_camera(float usable_width, float view_width,
+                                          float height) {
+  // Frame the whole track. The projection always spans the full framebuffer, so
+  // the map shrinks only as the camera rises; the camera must be high enough to
+  // fit the map both vertically (the projection's vertical FOV) and inside the
+  // `usable_width` pixels the caller keeps clear of a side panel. A slight tilt
+  // avoids a degenerate up vector, and the margin leaves a border.
+  const float cx = world::cell_center_x(world::kTrackSize / 2);
+  const float cz = world::cell_center_z(world::kTrackSize / 2);
+  const float half_extent = 0.5f * static_cast<float>(world::kTrackSize) * world::kSquareSize;
+  const float margin = 1.15f;
+  const float aspect = (height > 0.0f) ? view_width / height : 16.0f / 9.0f;
+  const float tan_h = std::tan(glm::radians(camera_.fov_deg * 0.5f));
+  const float tan_v = tan_h / std::max(aspect, 0.05f);
+  const float need_v = half_extent * margin / tan_v;
+  const float need_h =
+      half_extent * margin * view_width / std::max(usable_width, 1.0f) / tan_h;
+  const float height_needed = std::max(need_h, need_v);
+  camera_.position = glm::vec3(cx, height_needed, cz + height_needed * (3000.0f / 18000.0f));
+  aim_at(camera_, glm::vec3(cx, 0.0f, cz));
+  top_down_target_ = glm::vec3(cx, 0.0f, cz);
+}
+
 void DebugTrackScene::render(Renderer& renderer, int width, int height) {
-  renderer.draw_world(mesh_, camera_);
+  Camera cam = camera_;
+  if (top_down_) {
+    // Fit (and centre) the map inside the usable part of the framebuffer, which
+    // the front-end narrows to keep the view clear of its side panel.
+    const float view_w = static_cast<float>(width);
+    const float usable = (overview_w_ > 0.0f) ? std::min(overview_w_, view_w) : view_w;
+    if (usable != fit_w_ || view_w != fit_vw_ || static_cast<float>(height) != fit_h_) {
+      fit_top_down_camera(usable, view_w, static_cast<float>(height));
+      fit_w_ = usable;
+      fit_vw_ = view_w;
+      fit_h_ = static_cast<float>(height);
+    }
+    if (usable > 0.0f && usable < view_w) {
+      // Slide the camera so the track's centre lands in the middle of the usable
+      // rectangle. `right()` is screen-right, so moving the camera that way
+      // shifts the subject left on screen (see Camera::view).
+      const float ndc = 2.0f * (usable * 0.5f) / view_w - 1.0f;
+      const float dist = glm::length(camera_.position - top_down_target_);
+      cam.position +=
+          cam.right() * (-ndc * dist * std::tan(glm::radians(cam.fov_deg * 0.5f)));
+    }
+  }
+
+  renderer.draw_world(mesh_, cam);
 
   // Cycle the animated objects; /3 keeps the pace close to the 20 Hz game rate.
   const int phase = world::track_animation_phase(frame_index_ / 3);
-  renderer.draw_world(animated_meshes_[phase], camera_);
-  renderer.draw_world_lines(animated_lines_[phase], camera_);
+  renderer.draw_world(animated_meshes_[phase], cam);
+  renderer.draw_world_lines(animated_lines_[phase], cam);
 
   ++frame_index_;
   if (pending_hotkey_) {
@@ -162,9 +208,12 @@ void DebugTrackScene::handle_event(const SDL_Event& e) {
       top_down_ = !top_down_;
       const float cx = world::cell_center_x(world::kTrackSize / 2);
       const float cz = world::cell_center_z(world::kTrackSize / 2);
-      camera_.position = top_down_ ? glm::vec3(cx, 18000.0f, cz + 3000.0f)
-                                   : glm::vec3(cx - 9000.0f, 6500.0f, cz - 12000.0f);
-      aim_at(camera_, glm::vec3(cx, 0.0f, cz));
+      if (top_down_) {
+        fit_w_ = fit_h_ = fit_vw_ = 0.0f;  // force a viewport-fitted camera
+      } else {
+        camera_.position = glm::vec3(cx - 9000.0f, 6500.0f, cz - 12000.0f);
+        aim_at(camera_, glm::vec3(cx, 0.0f, cz));
+      }
     }
     if (e.key.keysym.sym == SDLK_F1) {
       mouse_look_ = !mouse_look_;
