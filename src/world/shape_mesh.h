@@ -52,9 +52,19 @@ void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
 // because their depths differ only by float error. Routing the markings to a
 // separate buffer lets the caller draw them with a forward depth bias (see
 // TrackMeshLayers::decal), which reproduces the original's outcome.
+//
+// When `fix_wall_seams` is set, a vertical wall whose top edge is coplanar with
+// one of the shape's horizontal faces has that edge dropped a couple of units,
+// unless another primitive continues upwards just above it (a rim standing on a
+// kerb). The original draws a whole shape back to front, so such an edge is
+// hidden by the surface drawn after it; tiled shapes in a z-buffered renderer
+// instead leak the edge as a one-pixel seam at every tile joint (the "tiny line"
+// on the solid elevated road). Only useful for track pieces that tile edge to
+// edge, so it defaults off.
 void append_shape(MeshBuilder& mb, const Shape3D& shape, const glm::mat4& model,
                   const PaintColorFn& color_for, int material = 0,
-                  MeshBuilder* line_out = nullptr, MeshBuilder* decal_out = nullptr);
+                  MeshBuilder* line_out = nullptr, MeshBuilder* decal_out = nullptr,
+                  bool fix_wall_seams = false);
 
 // Convenience: builds an identity-transform model that translates to (tx, ty, tz)
 // and rotates `yaw_deg` degrees about the world Y axis.

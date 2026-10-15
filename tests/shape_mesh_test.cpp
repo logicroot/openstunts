@@ -328,3 +328,58 @@ TEST(shape_mesh_paint_callback_can_skip) {
                       [](uint8_t) { return glm::vec4(0.0f); });
   EXPECT_EQ(mb.vertex_count(), 0u);
 }
+
+// Solid elevated road pieces (selr) tile end to end. Each piece's end wall has a
+// top edge exactly coplanar with the road surface, which a z-buffered renderer
+// leaks as a one-pixel seam at every tile joint -- the "tiny line on each block"
+// the user reported. With `fix_wall_seams` set, append_shape drops that edge a
+// hair, but leaves the edges a rim stands on (the side-wall/kerb tops) and the
+// surface itself alone. Synthetic shape so the test needs no asset files: a box
+// with a top surface at y=100, end/side walls below it, and rims on the sides.
+TEST(shape_mesh_seam_fix_drops_only_unsupported_wall_tops) {
+  Shape3D shape;
+  shape.vertices = {
+      Vec3i{-20, 0, -100},   Vec3i{20, 0, -100},   Vec3i{20, 0, 100},   Vec3i{-20, 0, 100},
+      Vec3i{-20, 100, -100}, Vec3i{20, 100, -100}, Vec3i{20, 100, 100}, Vec3i{-20, 100, 100},
+      Vec3i{-20, 110, -100}, Vec3i{20, 110, -100}, Vec3i{20, 110, 100}, Vec3i{-20, 110, 100},
+  };
+  auto quad = [&shape](uint8_t a, uint8_t b, uint8_t c, uint8_t d, uint8_t paint) {
+    ShapePrimitive prim;
+    prim.kind = PrimKind::Polygon;
+    prim.paint = {paint};
+    prim.indices = {a, b, c, d};
+    shape.primitives.push_back(prim);
+  };
+  quad(4, 5, 6, 7, 19);   // road surface (horizontal, y = 100)
+  quad(0, 1, 5, 4, 33);   // end wall -z
+  quad(2, 3, 7, 6, 33);   // end wall +z
+  quad(0, 3, 7, 4, 31);   // side wall -x
+  quad(1, 2, 6, 5, 31);   // side wall +x
+  quad(4, 7, 11, 8, 32);  // rim standing on side wall -x
+  quad(5, 6, 10, 9, 32);  // rim standing on side wall +x
+
+  // Encode the resolved paint byte into the colour so each group is observable.
+  auto paint_color = [](uint8_t paint) -> glm::vec4 {
+    return glm::vec4(static_cast<float>(paint), 0.0f, 0.0f, 1.0f);
+  };
+  auto top_of = [](const MeshBuilder& mb, int paint) {
+    float top = -1.0e9f;
+    for (const Vertex& v : mb.vertices()) {
+      if (static_cast<int>(v.color.r + 0.5f) == paint) top = std::max(top, v.position.y);
+    }
+    return top;
+  };
+
+  MeshBuilder fixed;
+  world::append_shape(fixed, shape, glm::mat4(1.0f), paint_color, 0, nullptr, nullptr, true);
+  EXPECT_TRUE(std::abs(top_of(fixed, 19) - 100.0f) < 0.001f);  // surface unchanged
+  EXPECT_TRUE(std::abs(top_of(fixed, 32) - 110.0f) < 0.001f);  // rims unchanged
+  EXPECT_TRUE(top_of(fixed, 33) <= 98.0f + 0.001f);            // end-wall edge dropped
+  EXPECT_TRUE(top_of(fixed, 33) > 90.0f);                      // but only a hair
+  EXPECT_TRUE(std::abs(top_of(fixed, 31) - 100.0f) < 0.001f);  // kerb under a rim kept
+
+  // Without the fix nothing moves.
+  MeshBuilder plain;
+  world::append_shape(plain, shape, glm::mat4(1.0f), paint_color, 0);
+  EXPECT_TRUE(std::abs(top_of(plain, 33) - 100.0f) < 0.001f);
+}
