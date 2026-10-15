@@ -622,7 +622,7 @@ void TrackCollision::build_track_object_from_track(const s3d::Track& track,
         set_pavement();
         planindex = 2;
         if (turn >= static_cast<int16_t>(0xFF94) && turn <= 0x6C) break;
-        const int angle = polar_angle_2d(wrap_add(vz, 0x400), wrap_add(vx, 0x400));
+        const int angle = polar_angle_2d(wrap_add(vx, 0x400), wrap_add(vz, 0x400));
         int wallsel = (s16_wrap((angle & 0xFF) * 0x12) >> 8);
         wallsel = -(wallsel - 0x11);
         wall_height = 0x2A;
@@ -682,7 +682,7 @@ void TrackCollision::build_track_object_from_track(const s3d::Track& track,
         const int turn = polar_radius(wrap_add(vz, 0x400), wrap_add(vx, 0x400)) - 0x600;
         if (turn <= static_cast<int16_t>(0xFF88)) break;
         if (turn >= 0x7E) break;
-        const int angle = polar_angle_2d(wrap_add(vz, 0x400), wrap_add(vx, 0x400));
+        const int angle = polar_angle_2d(wrap_add(vx, 0x400), wrap_add(vz, 0x400));
         int wallsel = (s16_wrap((angle & 0xFF) * 0x12) >> 8);
         wallsel = -(wallsel - 0x11);
         planindex = wallsel + 7;
@@ -968,7 +968,7 @@ void TrackCollision::build_track_object_from_track(const s3d::Track& track,
         const int turn = polar_radius(vz, misc1e);
         if (turn <= 0x14C) break;
         if (turn >= 0x2B4) break;
-        int16_t angle = static_cast<int16_t>(polar_angle_2d(vz, misc1e));
+        int16_t angle = static_cast<int16_t>(polar_angle_2d(misc1e, vz));
         angle = wrap_negate(wrap_sub(angle, 0x100));
         angle = static_cast<int16_t>(angle & 0x3FF);
         const int si = s16_wrap(angle * 0x18) >> 10;

@@ -8,8 +8,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cmath>
 #include <string>
 
+#include "assets/shape3d.h"
 #include "assets/trk.h"
 #include "core/paths.h"
 #include "physics/fixed_math.h"
@@ -37,6 +39,16 @@ Track empty_track() {
 // Stores an element byte at cell (x, y) (index = y*30 + x in this project).
 void set_item(Track* t, int x, int y, uint8_t item) {
   t->items[static_cast<size_t>(y) * Track::kSize + x] = item;
+}
+
+// Places a multi-tile element with its owner at (x, y) and the three
+// continuation markers the original writes around it (the owner is the min-x /
+// max-y cell of the 2x2 block).
+void place_multitile(Track* t, int x, int y, uint8_t item) {
+  set_item(t, x, y, item);
+  set_item(t, x, y - 1, world::kTileContinuationSouth);
+  set_item(t, x + 1, y - 1, world::kTileContinuationSoutheast);
+  set_item(t, x + 1, y, world::kTileContinuationEast);
 }
 
 void set_terrain(Track* t, int x, int y, uint8_t terrain) {
@@ -653,4 +665,121 @@ TEST(track_collision_build_object_real_track_road_cell) {
     }
   }
   EXPECT_TRUE(found);
+}
+
+// ---------------------------------------------------------------------------
+// Banked corners (code_bto_bankCorner)
+// ---------------------------------------------------------------------------
+// A banked turn is a quarter-annulus ramp drawn from shape 'btur': the road
+// climbs from the inner edge (shape-local radius 0x588, y = 0) to the outer
+// edge (radius 0x678, y = 0x82). `code_bto_bankCorner` picks one of 18 bank
+// planes from the polar angle of the wheel, so passing polarAngle its two
+// components in the wrong order lays the surface at the wrong height and the
+// car drives straight through the corner. (With the arguments swapped, item 53
+// selected plane 40, whose surface sits ~250 units *below* the rendered quad.)
+//
+// This pins the collision against the rendered shape for all four rotations:
+// the element is drawn at the block centre with the item's yaw, so the
+// collision surface must reproduce the same sloped quad heights (plus the
+// element flat-height offset applied by build_track_object).
+TEST(track_collision_banked_corner_matches_rendered_surface) {
+  const std::string dir = find_asset_dir();
+  if (dir.empty()) {
+    std::printf("  (skipped: no Stunts asset dir)\n");
+    return;
+  }
+  TrackCollision tc;
+  if (!load_collision(&tc)) {
+    std::printf("  (skipped: no GAME.PRE)\n");
+    return;
+  }
+  ShapeLibrary lib;
+  lib.load_p3s(path_join(dir, "GAME1.P3S"));
+  lib.load_p3s(path_join(dir, "GAME2.P3S"));
+  const Shape3D* shape = lib.find("btur");
+  if (shape == nullptr) {
+    std::printf("  (skipped: no 'btur' shape)\n");
+    return;
+  }
+
+  // The renderer places a multi-tile element at (owner_col + 1, owner_row) *
+  // kTileSize; the same block centre feeds build_track_object. Non-grass
+  // surfaces sit kNonGrassHeightOffset above the drawn quad's height.
+  constexpr int kOwnerCol = 5;
+  constexpr int kOwnerRow = 5;
+  constexpr int kFlatOffset = 2;
+
+  for (uint8_t item : {52u, 53u, 54u, 55u}) {
+    const world::TrackObjectDef& def = world::track_object(item);
+    EXPECT_EQ(def.multi_tile, 3);
+
+    const float px = (def.multi_tile & 2) ? (kOwnerCol + 1) * 1024.0f
+                                          : kOwnerCol * 1024.0f + 512.0f;
+    const float pz = (def.multi_tile & 1) ? kOwnerRow * 1024.0f
+                                          : kOwnerRow * 1024.0f + 512.0f;
+
+    Track t;
+    place_multitile(&t, kOwnerCol, kOwnerRow, item);
+    tc.set_track(&t);
+
+    fixed::Mat3 rot;
+    fixed::mat_rot_y(def.rot_y, &rot);
+
+    int sampled = 0;
+    int worst = 0;
+    // Surface prims are the near-horizontal quads (the banked road and the
+    // centre-line stripe); the outer rim is a set of vertical wall quads whose
+    // normal is horizontal. Sample each surface quad at its centroid: any
+    // affine combination of a planar quad's corners lies on its plane, so the
+    // centroid is a safe interior sample.
+    for (const ShapePrimitive& prim : shape->primitives) {
+      if (prim.indices.size() != 4) continue;
+      const Vec3i& a = shape->vertices[prim.indices[0]];
+      const Vec3i& b = shape->vertices[prim.indices[1]];
+      const Vec3i& c = shape->vertices[prim.indices[2]];
+      const double ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z;
+      const double vx = c.x - a.x, vy = c.y - a.y, vz = c.z - a.z;
+      const double nx = uy * vz - uz * vy;
+      const double ny = uz * vx - ux * vz;
+      const double nz = ux * vy - uy * vx;
+      const double nlen = std::sqrt(nx * nx + ny * ny + nz * nz);
+      if (nlen == 0.0 || std::abs(ny) < 0.5 * nlen) continue;  // skip vertical rims
+      int sx = 0, sy = 0, sz = 0;
+      for (uint8_t vi : prim.indices) {
+        const Vec3i& v = shape->vertices[vi];
+        sx += v.x;
+        sy += v.y;
+        sz += v.z;
+      }
+      const double cx = sx / 4.0, cy = sy / 4.0, cz = sz / 4.0;
+      const double wx = px + (rot.at(0, 0) * cx + rot.at(0, 1) * cy + rot.at(0, 2) * cz) / 16384.0;
+      const double wy = (rot.at(1, 0) * cx + rot.at(1, 1) * cy + rot.at(1, 2) * cz) / 16384.0;
+      const double wz = pz + (rot.at(2, 0) * cx + rot.at(2, 1) * cy + rot.at(2, 2) * cz) / 16384.0;
+      const int ix = static_cast<int>(std::lround(wx));
+      const int iz = static_cast<int>(std::lround(wz));
+
+      CollisionSample s;
+      tc.build_track_object(word_pos(ix, 0, iz), word_pos(ix, 0, iz), &s);
+      EXPECT_TRUE(s.plane_index != 0);
+
+      const Plane& p = tc.planes()[s.plane_index];
+      const int by = p.plane_origin.y + s.terrain_height;
+      int got = by;
+      if (s.plane_index >= 4 && p.plane_normal.y != 0) {
+        const int bx = p.plane_origin.x + s.elem_x_center;
+        const int bz = p.plane_origin.z + s.elem_z_center;
+        const int num = p.plane_normal.x * (ix - bx) + p.plane_normal.z * (iz - bz);
+        got = by - num / p.plane_normal.y;
+      }
+      const int want = static_cast<int>(std::lround(wy)) + kFlatOffset;
+      const int err = got - want;
+      if (std::abs(err) > std::abs(worst)) worst = err;
+      ++sampled;
+    }
+    EXPECT_TRUE(sampled >= 36);
+    if (std::abs(worst) > 2) {
+      std::printf("  item %u: collision surface off the rendered shape by %d\n", item, worst);
+    }
+    EXPECT_TRUE(std::abs(worst) <= 2);
+  }
 }
