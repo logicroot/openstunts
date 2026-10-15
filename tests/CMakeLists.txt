@@ -3,6 +3,7 @@ add_executable(s3d_tests
   trk_test.cpp
   car_test.cpp
   fixed_math_test.cpp
+  fixed_timestep_test.cpp
   compression_test.cpp
   shape3d_test.cpp
   shape_mesh_test.cpp

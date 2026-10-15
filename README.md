@@ -99,6 +99,11 @@ you get the driveable car on the track:
 | `--top` | (debug scene) top-down view |
 | `--drive` | Run the driveable car scene instead of the debug viewer |
 
+With `--screenshot` the loop ignores the wall clock and advances the simulation
+by one fixed step per rendered frame, so a given `--frames N` always captures the
+same simulated moment even on a loaded machine (repeated captures are
+byte-identical).
+
 The asset directory is searched in this order: `--assets`, `$STUNTS_DIR`,
 `~/stunts`, `./stunts`, `../stunts`.
 

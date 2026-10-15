@@ -32,6 +32,11 @@ class Application {
 
   void set_scene(std::unique_ptr<Scene> scene);
 
+  // Advance the simulation by a fixed step per rendered frame instead of by the
+  // wall clock, making an offline capture reproducible. Used by the screenshot
+  // path. Must be set before run().
+  void set_deterministic(bool on) { deterministic_ = on; }
+
  private:
   Config config_;
   std::string asset_dir_;
@@ -41,6 +46,7 @@ class Application {
   FixedTimestep timestep_{60.0};
   std::unique_ptr<Scene> scene_;
   bool running_ = false;
+  bool deterministic_ = false;
 };
 
 }  // namespace s3d

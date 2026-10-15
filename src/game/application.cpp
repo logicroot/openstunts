@@ -60,13 +60,21 @@ void Application::set_scene(std::unique_ptr<Scene> scene) {
 void Application::run() {
   running_ = true;
   Uint32 last_ticks = SDL_GetTicks();
+  // Deterministic mode advances by exactly one fixed step per rendered frame
+  // instead of by the wall clock. Rendered frame N then always corresponds to
+  // the same simulated time, so an offline capture is reproducible regardless
+  // of how fast the machine renders. (In real-time mode a frame that takes
+  // longer than a step runs catch-up steps, so the number of steps behind any
+  // given rendered frame drifts with load.)
+  const double fixed_step = timestep_.step_seconds();
   float fps_timer = 0.0f;
   int frames = 0;
 
   while (running_) {
     const Uint32 now = SDL_GetTicks();
-    double frame_seconds = static_cast<double>(now - last_ticks) / 1000.0;
+    const double wall_seconds = static_cast<double>(now - last_ticks) / 1000.0;
     last_ticks = now;
+    const double frame_seconds = deterministic_ ? fixed_step : wall_seconds;
 
     input_.begin_frame();
     SDL_Event e;
@@ -92,7 +100,7 @@ void Application::run() {
     if (!next.empty()) break;  // scene switching implemented in a later milestone
 
     ++frames;
-    fps_timer += static_cast<float>(frame_seconds);
+    fps_timer += static_cast<float>(wall_seconds);
     if (fps_timer >= 1.0f) {
       char title[160];
       std::snprintf(title, sizeof(title), "Stunts3D — %d fps", frames);

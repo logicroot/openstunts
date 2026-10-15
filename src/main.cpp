@@ -94,6 +94,9 @@ int main(int argc, char** argv) {
     if (!screenshot_path.empty()) scene->request_screenshot(screenshot_path, screenshot_frame);
     app.set_scene(std::move(scene));
   }
+  // An offline capture must not depend on how fast the machine renders, so the
+  // number of simulation steps behind the captured frame stays fixed.
+  if (!screenshot_path.empty()) app.set_deterministic(true);
   app.run();
 
   return 0;
