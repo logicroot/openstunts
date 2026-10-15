@@ -39,7 +39,11 @@ class Renderer {
 
  private:
   Shader world_shader_;
-  glm::vec3 light_dir_{0.4f, 1.0f, 0.3f};
+  // Direction towards the sun, in world space. The racing view looks down +Z
+  // from the grid, so the sun sits behind and to the right of it (a negative Z
+  // here) to keep the start/finish gate and the cars in front of it lit rather
+  // than back-lit. See the world fragment shader for how softly it is applied.
+  glm::vec3 light_dir_{0.45f, 1.0f, -0.40f};
   glm::vec3 fog_color_{0.55f, 0.70f, 0.85f};
   float fog_density_ = 0.0f;
   float current_aspect_ = 1.0f;

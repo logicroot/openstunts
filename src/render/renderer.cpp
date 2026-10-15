@@ -53,9 +53,14 @@ out vec4 frag_color;
 void main() {
   vec3 n = normalize(v_normal);
   float ndl = max(dot(n, normalize(u_light_dir)), 0.0);
-  // Hemisphere-ish ambient for a softer, modern look.
-  float ambient = mix(0.35, 0.65, n.y * 0.5 + 0.5);
-  vec3 lit = v_color.rgb * (ambient + 0.85 * ndl);
+  // Gentle relief only. The original engine never shaded a polygon by its
+  // normal -- a face's colour comes straight from the material table
+  // (seg006.asm: material type -> material_clrlist) -- and every shape already
+  // bakes its light and dark faces into those materials. So the sun adds just a
+  // little depth here, holding each face within about a tenth of its authored
+  // colour instead of the three- or fourfold range a full Lambert term gives.
+  float ambient = 0.90 + 0.10 * (n.y * 0.5 + 0.5);  // 0.90 (down) .. 1.00 (up)
+  vec3 lit = v_color.rgb * (ambient + 0.16 * ndl);
 
   vec3 fog = u_fog_color.rgb;
   float fog_amount = 1.0 - exp(-u_fog_density * v_view_depth);
